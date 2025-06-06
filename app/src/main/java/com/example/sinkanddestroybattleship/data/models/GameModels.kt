@@ -94,7 +94,7 @@ data class EnemyFireRequest(
 data class EnemyFireResponse(
     val x: Int?,
     val y: Int?,
-    val hit: Boolean = false,
+    val hit: Boolean? = null,
     val gameover: Boolean = false,
     val error: String? = null
 )

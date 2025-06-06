@@ -194,7 +194,9 @@ class BattleshipViewModel : ViewModel() {
                     _enemyShots.value = currentShots
                     
                     // Update the status text based on hit or miss
-                    _error.value = if (response.hit) "Enemy hit your ship!" else "Enemy missed!"
+                    response.hit?.let { hit ->
+                        _error.value = if (hit) "Enemy hit your ship!" else "Enemy missed!"
+                    }
                 }
             }
             _isMyTurn.value = true

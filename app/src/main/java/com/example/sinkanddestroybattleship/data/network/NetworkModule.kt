@@ -14,7 +14,7 @@ import javax.net.ssl.*
 object NetworkModule {
     private const val SERVER = "brad-home.ch"
     private const val PORT = 50003
-    private const val BASE_URL = "https://$SERVER:$PORT/"
+    private const val BASE_URL = "http://$SERVER:$PORT/"
 
     val moshi: Moshi = Moshi.Builder()
         .add(KotlinJsonAdapterFactory())
@@ -38,9 +38,10 @@ object NetworkModule {
 
     private val okHttpClient = OkHttpClient.Builder()
         .addInterceptor(loggingInterceptor)
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(300, TimeUnit.SECONDS)     // Increased timeout
+        .readTimeout(300, TimeUnit.SECONDS)        // Increased timeout
+        .writeTimeout(300, TimeUnit.SECONDS)       // Increased timeout
+        .retryOnConnectionFailure(true)           // Enable retries
         .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
         .hostnameVerifier { _, _ -> true }
         .build()
