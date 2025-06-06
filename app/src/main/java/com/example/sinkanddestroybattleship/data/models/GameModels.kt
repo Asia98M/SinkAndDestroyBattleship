@@ -94,7 +94,8 @@ data class EnemyFireRequest(
 data class EnemyFireResponse(
     val x: Int?,
     val y: Int?,
-    val gameover: Boolean
+    val gameover: Boolean = false,
+    val error: String? = null
 )
 
 data class PingResponse(

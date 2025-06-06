@@ -11,6 +11,7 @@ import com.example.sinkanddestroybattleship.data.models.BattleshipGame
 import com.example.sinkanddestroybattleship.data.models.Position
 import com.example.sinkanddestroybattleship.data.models.Ship
 import com.example.sinkanddestroybattleship.data.models.ShipType
+import com.example.sinkanddestroybattleship.data.network.ConnectionTest
 import com.example.sinkanddestroybattleship.databinding.ActivityMainBinding
 import com.example.sinkanddestroybattleship.ui.viewmodel.BattleshipViewModel
 import kotlinx.coroutines.launch
@@ -32,13 +33,36 @@ class MainActivity : AppCompatActivity() {
         setupShipPlacement()
         setupClickListeners()
         observeViewModel()
+        testServerConnection()
+    }
+
+    private fun testServerConnection() {
+        binding.statusText.text = "Testing server connection..."
+        binding.joinGameButton.isEnabled = false
         
-        // Test server connection
         lifecycleScope.launch {
-            viewModel.ping().onFailure {
-                runOnUiThread {
-                    Toast.makeText(this@MainActivity, "Cannot connect to server: ${it.message}", Toast.LENGTH_LONG).show()
+            val isReachable = ConnectionTest.isServerReachable()
+            val connectionDetails = ConnectionTest.getConnectionDetails()
+            
+            if (isReachable) {
+                binding.statusText.text = "Enter Player ID and Game ID to start"
+                binding.joinGameButton.isEnabled = true
+                
+                // Test game server API
+                viewModel.ping().onFailure { exception ->
+                    Toast.makeText(
+                        this@MainActivity,
+                        "Warning: Game server not responding: ${exception.message}",
+                        Toast.LENGTH_LONG
+                    ).show()
                 }
+            } else {
+                binding.statusText.text = "Server connection failed"
+                Toast.makeText(
+                    this@MainActivity,
+                    connectionDetails,
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
     }
@@ -152,13 +176,17 @@ class MainActivity : AppCompatActivity() {
             if (gameKey.isNotBlank() && playerId.isNotBlank()) {
                 binding.startGameButton.isEnabled = false
                 binding.statusText.text = "Joining game..."
-                viewModel.joinGame(playerId, gameKey, ships)
+                lifecycleScope.launch {
+                    viewModel.joinGame(playerId, gameKey, ships)
+                }
             }
         }
 
         binding.opponentBoard.setOnCellClickListener { position ->
             if (viewModel.isMyTurn.value == true) {
-                viewModel.fire(position.x, position.y)
+                lifecycleScope.launch {
+                    viewModel.fire(position.x, position.y)
+                }
             } else {
                 Toast.makeText(this, "Not your turn!", Toast.LENGTH_SHORT).show()
             }
@@ -186,7 +214,9 @@ class MainActivity : AppCompatActivity() {
             if (isMyTurn) {
                 binding.statusText.text = "Your turn!"
                 binding.opponentBoard.setOnCellClickListener { position ->
-                    viewModel.fire(position.x, position.y)
+                    lifecycleScope.launch {
+                        viewModel.fire(position.x, position.y)
+                    }
                 }
             } else {
                 binding.statusText.text = "Opponent's turn"

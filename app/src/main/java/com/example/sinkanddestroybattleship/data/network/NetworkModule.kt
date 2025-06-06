@@ -10,7 +10,9 @@ import retrofit2.converter.moshi.MoshiConverterFactory
 import java.util.concurrent.TimeUnit
 
 object NetworkModule {
-    private const val BASE_URL = "http://brad-home.ch:50003/"
+    private const val SERVER = "brad-home.ch"
+    private const val PORT = 50003
+    private const val BASE_URL = "http://$SERVER:$PORT/"
 
     val moshi: Moshi = Moshi.Builder()
         .add(KotlinJsonAdapterFactory())

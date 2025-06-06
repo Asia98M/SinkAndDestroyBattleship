@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.sinkanddestroybattleship.data.models.*
 import com.example.sinkanddestroybattleship.data.repository.BattleshipRepository
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class BattleshipViewModel : ViewModel() {
@@ -42,6 +43,8 @@ class BattleshipViewModel : ViewModel() {
     private var currentPlayer: String? = null
     private var currentGameKey: String? = null
     private var enemyFireJob: Job? = null
+    private var retryCount = 0
+    private val maxRetries = 3
 
     init {
         _playerHits.value = emptyList()
@@ -58,13 +61,20 @@ class BattleshipViewModel : ViewModel() {
         _playerShips.value = ships
         _playerHits.value = emptyList()
         _playerMisses.value = emptyList()
+        retryCount = 0
 
         viewModelScope.launch {
             repository.joinGame(player, gameKey, ships).fold(
                 onSuccess = { response ->
-                    _gameJoined.value = true
-                    handleEnemyFireResponse(response)
-                    startListeningForEnemyFire()
+                    if (response.error != null) {
+                        _error.value = response.error
+                        currentPlayer = null
+                        currentGameKey = null
+                    } else {
+                        _gameJoined.value = true
+                        handleEnemyFireResponse(response)
+                        startListeningForEnemyFire()
+                    }
                 },
                 onFailure = { exception ->
                     _error.value = exception.message
@@ -123,18 +133,53 @@ class BattleshipViewModel : ViewModel() {
 
             repository.enemyFire(player, gameKey).fold(
                 onSuccess = { response ->
-                    handleEnemyFireResponse(response)
-                    if (!response.gameover) {
-                        startListeningForEnemyFire()
+                    if (response.error != null) {
+                        handleServerError(response.error)
+                    } else {
+                        retryCount = 0
+                        handleEnemyFireResponse(response)
+                        if (!response.gameover) {
+                            delay(1000) // Add a small delay before next poll
+                            startListeningForEnemyFire()
+                        }
                     }
                 },
                 onFailure = { exception ->
-                    _error.value = exception.message
-                    if (!exception.message.orEmpty().contains("Timeout")) {
-                        startListeningForEnemyFire()
-                    }
+                    handleNetworkError(exception)
                 }
             )
+        }
+    }
+
+    private fun handleServerError(error: String) {
+        if (error.contains("Game not found") || error.contains("Invalid game")) {
+            _error.value = "Game session ended: $error"
+            _isGameOver.value = true
+        } else if (retryCount < maxRetries) {
+            retryCount++
+            viewModelScope.launch {
+                delay(2000L * retryCount) // Exponential backoff
+                startListeningForEnemyFire()
+            }
+        } else {
+            _error.value = "Server error after $maxRetries retries: $error"
+            _isGameOver.value = true
+        }
+    }
+
+    private fun handleNetworkError(exception: Throwable) {
+        val errorMsg = exception.message.orEmpty()
+        _error.value = errorMsg
+        
+        if (!errorMsg.contains("Timeout") && retryCount < maxRetries) {
+            retryCount++
+            viewModelScope.launch {
+                delay(2000L * retryCount) // Exponential backoff
+                startListeningForEnemyFire()
+            }
+        } else if (retryCount >= maxRetries) {
+            _error.value = "Connection lost after $maxRetries retries"
+            _isGameOver.value = true
         }
     }
 
