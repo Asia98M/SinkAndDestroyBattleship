@@ -24,8 +24,11 @@ class BattleshipViewModel : ViewModel() {
     private val _enemyShots = MutableLiveData<List<Position>>()
     val enemyShots: LiveData<List<Position>> = _enemyShots
 
-    private val _playerShots = MutableLiveData<List<Position>>()
-    val playerShots: LiveData<List<Position>> = _playerShots
+    private val _playerHits = MutableLiveData<List<Position>>()
+    val playerHits: LiveData<List<Position>> = _playerHits
+
+    private val _playerMisses = MutableLiveData<List<Position>>()
+    val playerMisses: LiveData<List<Position>> = _playerMisses
 
     private val _isGameOver = MutableLiveData<Boolean>()
     val isGameOver: LiveData<Boolean> = _isGameOver
@@ -33,23 +36,40 @@ class BattleshipViewModel : ViewModel() {
     private val _isMyTurn = MutableLiveData<Boolean>()
     val isMyTurn: LiveData<Boolean> = _isMyTurn
 
+    private val _gameJoined = MutableLiveData<Boolean>()
+    val gameJoined: LiveData<Boolean> = _gameJoined
+
     private var currentPlayer: String? = null
     private var currentGameKey: String? = null
     private var enemyFireJob: Job? = null
+
+    init {
+        _playerHits.value = emptyList()
+        _playerMisses.value = emptyList()
+    }
+
+    suspend fun ping(): Result<Boolean> {
+        return repository.ping()
+    }
 
     fun joinGame(player: String, gameKey: String, ships: List<Ship>) {
         currentPlayer = player
         currentGameKey = gameKey
         _playerShips.value = ships
+        _playerHits.value = emptyList()
+        _playerMisses.value = emptyList()
 
         viewModelScope.launch {
             repository.joinGame(player, gameKey, ships).fold(
                 onSuccess = { response ->
+                    _gameJoined.value = true
                     handleEnemyFireResponse(response)
                     startListeningForEnemyFire()
                 },
                 onFailure = { exception ->
                     _error.value = exception.message
+                    currentPlayer = null
+                    currentGameKey = null
                 }
             )
         }
@@ -66,14 +86,21 @@ class BattleshipViewModel : ViewModel() {
         viewModelScope.launch {
             repository.fire(player, gameKey, x, y).fold(
                 onSuccess = { response ->
-                    val currentShots = _playerShots.value.orEmpty().toMutableList()
-                    currentShots.add(Position(x, y))
-                    _playerShots.value = currentShots
+                    val position = Position(x, y)
                     if (response.hit) {
-                        // Handle hit
-                    }
-                    if (response.shipsSunk.isNotEmpty()) {
-                        // Handle sunk ships
+                        val currentHits = _playerHits.value.orEmpty().toMutableList()
+                        currentHits.add(position)
+                        _playerHits.value = currentHits
+                        _error.value = if (response.shipsSunk.isNotEmpty()) {
+                            "Hit and sunk ${response.shipsSunk.joinToString()}!"
+                        } else {
+                            "Hit!"
+                        }
+                    } else {
+                        val currentMisses = _playerMisses.value.orEmpty().toMutableList()
+                        currentMisses.add(position)
+                        _playerMisses.value = currentMisses
+                        _error.value = "Miss!"
                     }
                     _isMyTurn.value = false
                 },
@@ -103,6 +130,9 @@ class BattleshipViewModel : ViewModel() {
                 },
                 onFailure = { exception ->
                     _error.value = exception.message
+                    if (!exception.message.orEmpty().contains("Timeout")) {
+                        startListeningForEnemyFire()
+                    }
                 }
             )
         }
@@ -133,5 +163,6 @@ data class GameState(
     val isGameOver: Boolean,
     val playerShips: List<Ship>,
     val enemyShots: List<Position>,
-    val playerShots: List<Position>
+    val playerHits: List<Position>,
+    val playerMisses: List<Position>
 ) 

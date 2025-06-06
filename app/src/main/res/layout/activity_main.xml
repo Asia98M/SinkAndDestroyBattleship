@@ -25,13 +25,6 @@
             android:layout_height="wrap_content"
             android:orientation="horizontal">
 
-            <Button
-                android:id="@+id/createGameButton"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:text="Create Game" />
-
             <EditText
                 android:id="@+id/gameIdInput"
                 android:layout_width="0dp"
@@ -43,9 +36,8 @@
 
             <Button
                 android:id="@+id/joinGameButton"
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
                 android:text="Join Game" />
         </LinearLayout>
     </LinearLayout>
@@ -57,7 +49,44 @@
         android:layout_marginTop="8dp"
         android:gravity="center"
         android:textSize="16sp"
+        android:text="Enter Player ID and Game ID to start"
         app:layout_constraintTop_toBottomOf="@id/gameSetupLayout" />
+
+    <LinearLayout
+        android:id="@+id/shipPlacementControls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="8dp"
+        android:orientation="horizontal"
+        android:visibility="gone"
+        app:layout_constraintTop_toBottomOf="@id/statusText">
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Ship: "
+            android:layout_gravity="center_vertical" />
+
+        <Spinner
+            android:id="@+id/shipTypeSpinner"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1" />
+
+        <Button
+            android:id="@+id/rotateButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Rotate" />
+
+        <Button
+            android:id="@+id/startGameButton"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Start"
+            android:visibility="gone" />
+
+    </LinearLayout>
 
     <LinearLayout
         android:id="@+id/boardsContainer"
@@ -65,8 +94,8 @@
         android:layout_height="0dp"
         android:layout_marginTop="8dp"
         android:orientation="vertical"
-        app:layout_constraintBottom_toTopOf="@id/controlsLayout"
-        app:layout_constraintTop_toBottomOf="@id/statusText">
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/shipPlacementControls">
 
         <com.example.sinkanddestroybattleship.ui.view.BattleshipBoardView
             android:id="@+id/playerBoard"
@@ -83,42 +112,6 @@
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1" />
-    </LinearLayout>
-
-    <LinearLayout
-        android:id="@+id/controlsLayout"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="vertical"
-        app:layout_constraintBottom_toBottomOf="parent">
-
-        <LinearLayout
-            android:id="@+id/shipPlacementControls"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:orientation="horizontal">
-
-            <Spinner
-                android:id="@+id/shipSizeSpinner"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1" />
-
-            <Spinner
-                android:id="@+id/orientationSpinner"
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1" />
-
-        </LinearLayout>
-
-        <TextView
-            android:id="@+id/instructionsText"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:gravity="center"
-            android:textSize="14sp" />
     </LinearLayout>
 
 </androidx.constraintlayout.widget.ConstraintLayout>
