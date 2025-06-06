@@ -74,6 +74,7 @@ class BattleshipViewModel : ViewModel() {
                         currentGameKey = null
                     } else {
                         _gameJoined.value = true
+                        _isMyTurn.value = response.x == null && response.y == null
                         handleEnemyFireResponse(response)
                         startListeningForEnemyFire()
                     }
@@ -207,9 +208,17 @@ class BattleshipViewModel : ViewModel() {
                 }
                 _isMyTurn.value = true
             } else {
-                // No shot coordinates means waiting for opponent
-                _error.value = "Waiting for opponent's move..."
-                _isMyTurn.value = false
+                // No shot coordinates could mean:
+                // 1. We're the first player to join (our turn)
+                // 2. We're the second player and need to wait
+                // 3. We're waiting for opponent's move
+                if (_gameJoined.value == true) {
+                    _error.value = if (_isMyTurn.value == true) {
+                        "Your turn! Make your move."
+                    } else {
+                        "Waiting for opponent's move..."
+                    }
+                }
             }
         }
     }

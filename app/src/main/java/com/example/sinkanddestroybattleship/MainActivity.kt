@@ -211,15 +211,16 @@ class MainActivity : AppCompatActivity() {
         }
 
         viewModel.isMyTurn.observe(this) { isMyTurn ->
+            binding.opponentBoard.isEnabled = isMyTurn
             if (isMyTurn) {
-                binding.statusText.text = "Your turn!"
+                binding.statusText.text = "Your turn! Click on opponent's board to fire."
                 binding.opponentBoard.setOnCellClickListener { position ->
                     lifecycleScope.launch {
                         viewModel.fire(position.x, position.y)
                     }
                 }
             } else {
-                binding.statusText.text = "Opponent's turn"
+                binding.statusText.text = "Opponent's turn - please wait..."
                 binding.opponentBoard.setOnCellClickListener(null)
             }
         }
@@ -228,6 +229,7 @@ class MainActivity : AppCompatActivity() {
             if (isGameOver) {
                 binding.statusText.text = "Game Over!"
                 binding.opponentBoard.setOnCellClickListener(null)
+                binding.opponentBoard.isEnabled = false
             }
         }
 
@@ -245,6 +247,11 @@ class MainActivity : AppCompatActivity() {
                 binding.playerIdInput.isEnabled = false
                 binding.startGameButton.visibility = View.GONE
                 isPlacingShips = false
+                binding.statusText.text = if (viewModel.isMyTurn.value == true) {
+                    "Game started - Your turn!"
+                } else {
+                    "Game started - Waiting for opponent..."
+                }
             }
         }
     }
