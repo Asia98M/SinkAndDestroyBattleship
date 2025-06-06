@@ -1,5 +1,6 @@
 package com.example.sinkanddestroybattleship.ui.viewmodel
 
+import android.annotation.SuppressLint
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
@@ -55,6 +56,7 @@ class BattleshipViewModel : ViewModel() {
         return repository.ping()
     }
 
+    @SuppressLint("NullSafeMutableLiveData")
     fun joinGame(player: String, gameKey: String, ships: List<Ship>) {
         currentPlayer = player
         currentGameKey = gameKey
@@ -97,22 +99,26 @@ class BattleshipViewModel : ViewModel() {
             repository.fire(player, gameKey, x, y).fold(
                 onSuccess = { response ->
                     val position = Position(x, y)
-                    if (response.hit) {
-                        val currentHits = _playerHits.value.orEmpty().toMutableList()
-                        currentHits.add(position)
-                        _playerHits.value = currentHits
-                        _error.value = if (response.shipsSunk.isNotEmpty()) {
-                            "Hit and sunk ${response.shipsSunk.joinToString()}!"
+                    response.hit?.let { isHit ->
+                        if (isHit) {
+                            val currentHits = _playerHits.value.orEmpty().toMutableList()
+                            currentHits.add(position)
+                            _playerHits.value = currentHits
+                            _error.value = if (response.shipsSunk.isNotEmpty()) {
+                                "Hit and sunk ${response.shipsSunk.joinToString()}!"
+                            } else {
+                                "Hit!"
+                            }
                         } else {
-                            "Hit!"
+                            val currentMisses = _playerMisses.value.orEmpty().toMutableList()
+                            currentMisses.add(position)
+                            _playerMisses.value = currentMisses
+                            _error.value = "Miss!"
                         }
-                    } else {
-                        val currentMisses = _playerMisses.value.orEmpty().toMutableList()
-                        currentMisses.add(position)
-                        _playerMisses.value = currentMisses
-                        _error.value = "Miss!"
+                        _isMyTurn.value = false
+                    } ?: run {
+                        _error.value = "Invalid response from server"
                     }
-                    _isMyTurn.value = false
                 },
                 onFailure = { exception ->
                     _error.value = exception.message
@@ -138,7 +144,7 @@ class BattleshipViewModel : ViewModel() {
                     } else {
                         retryCount = 0
                         handleEnemyFireResponse(response)
-                        if (!response.gameover) {
+                        if (!(response.gameover ?: false)) {
                             delay(1000) // Add a small delay before next poll
                             startListeningForEnemyFire()
                         }
@@ -184,8 +190,8 @@ class BattleshipViewModel : ViewModel() {
     }
 
     private fun handleEnemyFireResponse(response: EnemyFireResponse) {
-        _isGameOver.value = response.gameover
-        if (!response.gameover) {
+        _isGameOver.value = response.gameover ?: false
+        if (!(response.gameover ?: false)) {
             response.x?.let { x ->
                 response.y?.let { y ->
                     val currentShots = _enemyShots.value.orEmpty().toMutableList()
@@ -194,8 +200,10 @@ class BattleshipViewModel : ViewModel() {
                     _enemyShots.value = currentShots
                     
                     // Update the status text based on hit or miss
-                    response.hit?.let { hit ->
-                        _error.value = if (hit) "Enemy hit your ship!" else "Enemy missed!"
+                    response.hit?.let { isHit ->
+                        _error.value = if (isHit) "Enemy hit your ship!" else "Enemy missed!"
+                    } ?: run {
+                        _error.value = "Enemy fired at ($x, $y)"
                     }
                 }
             }

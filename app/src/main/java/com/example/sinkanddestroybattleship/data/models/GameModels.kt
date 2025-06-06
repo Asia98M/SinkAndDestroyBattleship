@@ -69,9 +69,9 @@ data class ShootRequest(
 )
 
 data class GameResponse(
-    val success: Boolean,
-    val message: String?,
-    val gameState: GameState?
+    val success: Boolean? = null,
+    val message: String? = null,
+    val gameState: GameState? = null
 )
 
 data class FireRequest(
@@ -95,16 +95,16 @@ data class EnemyFireResponse(
     val x: Int? = null,
     val y: Int? = null,
     val hit: Boolean? = null,
-    val gameover: Boolean = false,
+    val gameover: Boolean? = false,
     val error: String? = null
 )
 
 data class PingResponse(
-    val ping: Boolean
+    val ping: Boolean? = null
 )
 
 data class ErrorResponse(
-    val Error: String
+    val Error: String? = null
 )
 
 enum class ShipType(val size: Int) {
