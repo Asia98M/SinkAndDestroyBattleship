@@ -189,8 +189,12 @@ class BattleshipViewModel : ViewModel() {
             response.x?.let { x ->
                 response.y?.let { y ->
                     val currentShots = _enemyShots.value.orEmpty().toMutableList()
-                    currentShots.add(Position(x, y))
+                    val position = Position(x, y)
+                    currentShots.add(position)
                     _enemyShots.value = currentShots
+                    
+                    // Update the status text based on hit or miss
+                    _error.value = if (response.hit) "Enemy hit your ship!" else "Enemy missed!"
                 }
             }
             _isMyTurn.value = true

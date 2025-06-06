@@ -25,7 +25,7 @@ data class Ship(
 
 data class Shot(
     val position: Position,
-    val hit: Boolean
+    val hit: Boolean,
 )
 
 data class Position(
@@ -94,6 +94,7 @@ data class EnemyFireRequest(
 data class EnemyFireResponse(
     val x: Int?,
     val y: Int?,
+    val hit: Boolean = false,
     val gameover: Boolean = false,
     val error: String? = null
 )
