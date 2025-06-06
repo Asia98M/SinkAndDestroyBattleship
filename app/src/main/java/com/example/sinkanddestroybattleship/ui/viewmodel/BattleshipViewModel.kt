@@ -192,22 +192,25 @@ class BattleshipViewModel : ViewModel() {
     private fun handleEnemyFireResponse(response: EnemyFireResponse) {
         _isGameOver.value = response.gameover ?: false
         if (!(response.gameover ?: false)) {
-            response.x?.let { x ->
-                response.y?.let { y ->
-                    val currentShots = _enemyShots.value.orEmpty().toMutableList()
-                    val position = Position(x, y)
-                    currentShots.add(position)
-                    _enemyShots.value = currentShots
-                    
-                    // Update the status text based on hit or miss
-                    response.hit?.let { isHit ->
-                        _error.value = if (isHit) "Enemy hit your ship!" else "Enemy missed!"
-                    } ?: run {
-                        _error.value = "Enemy fired at ($x, $y)"
-                    }
+            // Check if we have actual coordinates (a shot was made)
+            if (response.x != null && response.y != null) {
+                val currentShots = _enemyShots.value.orEmpty().toMutableList()
+                val position = Position(response.x, response.y)
+                currentShots.add(position)
+                _enemyShots.value = currentShots
+                
+                // Update the status text based on hit or miss
+                response.hit?.let { isHit ->
+                    _error.value = if (isHit) "Enemy hit your ship!" else "Enemy missed!"
+                } ?: run {
+                    _error.value = "Enemy fired at (${response.x}, ${response.y})"
                 }
+                _isMyTurn.value = true
+            } else {
+                // No shot coordinates means waiting for opponent
+                _error.value = "Waiting for opponent's move..."
+                _isMyTurn.value = false
             }
-            _isMyTurn.value = true
         }
     }
 
