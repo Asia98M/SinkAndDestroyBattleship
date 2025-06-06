@@ -25,7 +25,7 @@ data class Ship(
 
 data class Shot(
     val position: Position,
-    val hit: Boolean,
+    val hit: Boolean? = null
 )
 
 data class Position(
@@ -82,8 +82,8 @@ data class FireRequest(
 )
 
 data class FireResponse(
-    val hit: Boolean,
-    val shipsSunk: List<String>
+    val hit: Boolean? = null,
+    val shipsSunk: List<String> = emptyList()
 )
 
 data class EnemyFireRequest(
@@ -92,8 +92,8 @@ data class EnemyFireRequest(
 )
 
 data class EnemyFireResponse(
-    val x: Int?,
-    val y: Int?,
+    val x: Int? = null,
+    val y: Int? = null,
     val hit: Boolean? = null,
     val gameover: Boolean = false,
     val error: String? = null

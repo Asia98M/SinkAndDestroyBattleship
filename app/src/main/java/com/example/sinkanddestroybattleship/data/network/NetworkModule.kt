@@ -7,9 +7,7 @@ import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.moshi.MoshiConverterFactory
-import java.security.cert.X509Certificate
 import java.util.concurrent.TimeUnit
-import javax.net.ssl.*
 
 object NetworkModule {
     private const val SERVER = "brad-home.ch"
@@ -24,26 +22,12 @@ object NetworkModule {
         level = HttpLoggingInterceptor.Level.BODY
     }
 
-    // Create a trust manager that trusts all certificates
-    private val trustAllCerts = arrayOf<TrustManager>(object : X509TrustManager {
-        override fun checkClientTrusted(chain: Array<X509Certificate>, authType: String) {}
-        override fun checkServerTrusted(chain: Array<X509Certificate>, authType: String) {}
-        override fun getAcceptedIssuers(): Array<X509Certificate> = arrayOf()
-    })
-
-    // Create an SSL context with our trust manager
-    private val sslContext = SSLContext.getInstance("SSL").apply {
-        init(null, trustAllCerts, java.security.SecureRandom())
-    }
-
     private val okHttpClient = OkHttpClient.Builder()
         .addInterceptor(loggingInterceptor)
-        .connectTimeout(300, TimeUnit.SECONDS)     // Increased timeout
-        .readTimeout(300, TimeUnit.SECONDS)        // Increased timeout
-        .writeTimeout(300, TimeUnit.SECONDS)       // Increased timeout
-        .retryOnConnectionFailure(true)           // Enable retries
-        .sslSocketFactory(sslContext.socketFactory, trustAllCerts[0] as X509TrustManager)
-        .hostnameVerifier { _, _ -> true }
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
         .build()
 
     private val retrofit = Retrofit.Builder()
