@@ -3,19 +3,19 @@ package com.example.sinkanddestroybattleship.data.models
 class BattleshipGame {
     companion object {
         val SHIP_TYPES = listOf(
-            ShipType.CARRIER,      // Size: 5
-            ShipType.BATTLESHIP,   // Size: 4
-            ShipType.DESTROYER,    // Size: 3
-            ShipType.SUBMARINE,    // Size: 3
-            ShipType.PATROL_BOAT   // Size: 2
+            ShipType.Carrier,      // Size: 5
+            ShipType.Battleship,   // Size: 4
+            ShipType.Destroyer,    // Size: 3
+            ShipType.Submarine,    // Size: 3
+            ShipType.PatrolBoat   // Size: 2
         )
 
         val SHIP_DESCRIPTIONS = mapOf(
-            ShipType.CARRIER to "Aircraft Carrier (5 spaces): The largest ship in your fleet",
-            ShipType.BATTLESHIP to "Battleship (4 spaces): A powerful warship",
-            ShipType.DESTROYER to "Destroyer (3 spaces): Fast and maneuverable",
-            ShipType.SUBMARINE to "Submarine (3 spaces): Stealthy underwater vessel",
-            ShipType.PATROL_BOAT to "Patrol Boat (2 spaces): Small but essential"
+            ShipType.Carrier to "Aircraft Carrier (5 spaces): The largest ship in your fleet",
+            ShipType.Battleship to "Battleship (4 spaces): A powerful warship",
+            ShipType.Destroyer to "Destroyer (3 spaces): Fast and maneuverable",
+            ShipType.Submarine to "Submarine (3 spaces): Stealthy underwater vessel",
+            ShipType.PatrolBoat to "Patrol Boat (2 spaces): Small but essential"
         )
     }
 
@@ -58,8 +58,8 @@ class BattleshipGame {
         }
     }
 
-    fun getShipPlacementPreview(x: Int, y: Int, shipType: ShipType, orientation: String): List<Position> {
-        val ship = Ship(shipType.name, x, y, orientation)
+    fun getShipPlacementPreview(orientation: String, shipType: ShipType, x: Int, y: Int): List<Position> {
+        val ship = Ship(orientation, x, shipType.name, y)
         return calculateShipCells(ship)
     }
 } 

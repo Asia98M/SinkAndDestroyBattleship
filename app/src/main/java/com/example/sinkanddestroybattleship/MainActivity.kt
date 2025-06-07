@@ -104,7 +104,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateShipPlacementPreview(position: Position) {
         val nextShip = battleshipGame.getNextShipToPlace(ships)
         if (nextShip != null) {
-            val previewShip = Ship(nextShip.name, position.x, position.y, currentOrientation)
+            val previewShip = Ship(nextShip.name, position.x,currentOrientation, position.y)
             val previewCells = battleshipGame.calculateShipCells(previewShip)
             val isValid = battleshipGame.isValidPlacement(previewShip, ships)
             binding.playerBoard.setPreview(previewCells, isValid)
@@ -120,7 +120,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val ship = Ship(nextShip.name, position.x, position.y, currentOrientation)
+        val ship = Ship(currentOrientation, position.x, nextShip.name ,position.y)
         
         if (battleshipGame.isValidPlacement(ship, ships)) {
             ships.add(ship)

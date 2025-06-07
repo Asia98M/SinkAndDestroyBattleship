@@ -17,10 +17,11 @@ data class Board(
 )
 
 data class Ship(
-    val ship: String,
+    val orientation: String,
     val x: Int,
+    val ship: String,
     val y: Int,
-    val orientation: String
+
 )
 
 data class Shot(
@@ -51,9 +52,11 @@ data class GameCreationResponse(
 )
 
 data class JoinGameRequest(
-    val player: String,
+    val ships: List<Ship>,
     val gamekey: String,
-    val ships: List<Ship>
+    val player: String,
+
+
 )
 
 data class PlaceShipRequest(
@@ -108,9 +111,9 @@ data class ErrorResponse(
 )
 
 enum class ShipType(val size: Int) {
-    CARRIER(5),
-    BATTLESHIP(4),
-    DESTROYER(3),
-    SUBMARINE(3),
-    PATROL_BOAT(2)
+    Carrier(5),
+    Battleship(4),
+    Destroyer(3),
+    Submarine(3),
+    PatrolBoat(2)
 } 

@@ -30,7 +30,7 @@ class BattleshipRepository {
     suspend fun joinGame(player: String, gameKey: String, ships: List<Ship>): Result<EnemyFireResponse> = 
         withContext(Dispatchers.IO) {
             try {
-                val request = JoinGameRequest(player, gameKey, ships)
+                val request = JoinGameRequest(ships, player, gameKey)
                 Log.d(TAG, "Join game request: $request")
                 val response = api.joinGame(request)
                 Log.d(TAG, "Join game response: ${response.raw()}")

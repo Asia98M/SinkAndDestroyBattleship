@@ -100,10 +100,10 @@ class BattleshipBoardView @JvmOverloads constructor(
         ships.forEach { ship ->
             val shipSize = ShipType.valueOf(ship.ship).size
             paint.color = when (ship.ship) {
-                ShipType.CARRIER.name -> Color.DKGRAY
-                ShipType.BATTLESHIP.name -> Color.rgb(80, 80, 80)
-                ShipType.DESTROYER.name -> Color.rgb(100, 100, 100)
-                ShipType.SUBMARINE.name -> Color.rgb(120, 120, 120)
+                ShipType.Carrier.name -> Color.DKGRAY
+                ShipType.Battleship.name -> Color.rgb(80, 80, 80)
+                ShipType.Destroyer.name -> Color.rgb(100, 100, 100)
+                ShipType.Submarine.name -> Color.rgb(120, 120, 120)
                 else -> Color.rgb(140, 140, 140)
             }
 
