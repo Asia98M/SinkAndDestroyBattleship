@@ -13,6 +13,10 @@ object NetworkModule {
     private const val SERVER = "brad-home.ch"
     private const val PORT = 50003
     private const val BASE_URL = "http://$SERVER:$PORT/"
+    private const val CONNECT_TIMEOUT = 15L
+    private const val READ_TIMEOUT = 30L
+    private const val WRITE_TIMEOUT = 15L
+    private const val MAX_RETRIES = 3
 
     val moshi: Moshi = Moshi.Builder()
         .add(KotlinJsonAdapterFactory())
@@ -24,10 +28,21 @@ object NetworkModule {
 
     private val okHttpClient = OkHttpClient.Builder()
         .addInterceptor(loggingInterceptor)
-        .connectTimeout(600, TimeUnit.SECONDS)
-        .readTimeout(600, TimeUnit.SECONDS)
-        .writeTimeout(600, TimeUnit.SECONDS)
+        .connectTimeout(CONNECT_TIMEOUT, TimeUnit.SECONDS)
+        .readTimeout(READ_TIMEOUT, TimeUnit.SECONDS)
+        .writeTimeout(WRITE_TIMEOUT, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .addInterceptor { chain ->
+            var retryCount = 0
+            var response = chain.proceed(chain.request())
+            
+            while (!response.isSuccessful && retryCount < MAX_RETRIES) {
+                retryCount++
+                response.close()
+                response = chain.proceed(chain.request())
+            }
+            response
+        }
         .build()
 
     private val retrofit = Retrofit.Builder()

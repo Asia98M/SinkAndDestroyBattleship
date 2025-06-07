@@ -48,9 +48,9 @@ class BattleshipViewModel : ViewModel() {
     private var gameLoopJob: Job? = null
     private var enemyFireJob: Job? = null
     private var retryCount = 0
-    private val maxRetries = 3
-    private val pollingDelay = 1000L
-    private val longPollingTimeout = 30000L
+    private val maxRetries = 5
+    private val pollingDelay = 2000L
+    private val longPollingTimeout = 60000L
 
     suspend fun ping(): Result<Boolean> = repository.ping()
 
@@ -302,7 +302,16 @@ class BattleshipViewModel : ViewModel() {
     }
 
     private fun handleNetworkError(exception: Throwable) {
-        _error.value = exception.message ?: "Network error"
+        _error.value = when {
+            exception.message?.contains("Connection refused") == true -> 
+                "Cannot connect to game server. Please check your internet connection."
+            exception.message?.contains("timeout") == true ->
+                "Connection timed out. Please check your internet connection."
+            exception.message?.contains("not found") == true ->
+                "Game not found. The game may have expired."
+            else -> exception.message ?: "Network error"
+        }
+        
         if (++retryCount <= maxRetries) {
             _statusText.value = "Connection issue, retrying... (Attempt $retryCount/$maxRetries)"
             viewModelScope.launch {
@@ -311,7 +320,7 @@ class BattleshipViewModel : ViewModel() {
             }
         } else {
             updateGameState { it.copy(phase = GamePhase.FINISHED, isGameOver = true) }
-            _statusText.value = "Connection lost after $maxRetries retries"
+            _statusText.value = "Connection lost after $maxRetries retries. Please restart the game."
         }
     }
 
