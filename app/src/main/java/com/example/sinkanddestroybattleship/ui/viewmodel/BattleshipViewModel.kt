@@ -67,11 +67,20 @@ class BattleshipViewModel : ViewModel() {
     val statusText: LiveData<String> = _statusText
 
     init {
+        resetGameState()
+    }
+
+    private fun resetGameState() {
         _playerHits.value = emptyList()
         _playerMisses.value = emptyList()
         _sunkShips.value = emptyList()
         _isWaitingForOpponent.value = false
         _bothPlayersConnected.value = false
+        _isGameOver.value = false
+        _isMyTurn.value = false
+        _gameJoined.value = false
+        _enemyShots.value = emptyList()
+        retryCount = 0
     }
 
     suspend fun ping(): Result<Boolean> {
@@ -80,6 +89,9 @@ class BattleshipViewModel : ViewModel() {
 
     @SuppressLint("NullSafeMutableLiveData")
     fun joinGame(player: String, gameKey: String, ships: List<Ship>) {
+        // Reset game state before joining
+        resetGameState()
+        
         // Validate IDs first
         val battleshipGame = BattleshipGame()
         val idError = battleshipGame.validateIds(player, gameKey)
@@ -98,11 +110,7 @@ class BattleshipViewModel : ViewModel() {
         currentPlayer = player
         currentGameKey = gameKey
         _playerShips.value = ships
-        _playerHits.value = emptyList()
-        _playerMisses.value = emptyList()
-        retryCount = 0
         _isWaitingForOpponent.value = true
-        _bothPlayersConnected.value = false
 
         viewModelScope.launch {
             try {
@@ -142,9 +150,6 @@ class BattleshipViewModel : ViewModel() {
     private fun handleJoinSuccess(response: EnemyFireResponse) {
         Log.d(TAG, "Join game success: $response")
         _gameJoined.value = true
-        _sunkShips.value = emptyList()
-        _isWaitingForOpponent.value = false
-        _bothPlayersConnected.value = false
         
         if (response.gameover) {
             _statusText.value = "Game ended unexpectedly"
@@ -215,8 +220,10 @@ class BattleshipViewModel : ViewModel() {
 
     private fun handleEnemyShot(response: EnemyFireResponse) {
         if (response.x != null && response.y != null) {
-            val currentShots = _enemyShots.value.orEmpty().toMutableList()
             val position = Position(response.x, response.y)
+            
+            // Update enemy shots
+            val currentShots = _enemyShots.value.orEmpty().toMutableList()
             currentShots.add(position)
             _enemyShots.value = currentShots
             
@@ -237,6 +244,20 @@ class BattleshipViewModel : ViewModel() {
                     "Enemy sunk your ${hitShip.ship}! Your turn."
                 } else {
                     "Enemy hit your ${hitShip.ship} at (${response.x}, ${response.y})! Your turn."
+                }
+
+                // Check if all ships are sunk
+                val allShipsSunk = _playerShips.value?.all { ship ->
+                    val cells = BattleshipGame().calculateShipCells(ship)
+                    cells.all { cell ->
+                        currentShots.any { shot -> shot.x == cell.x && shot.y == cell.y }
+                    }
+                } ?: false
+
+                if (allShipsSunk) {
+                    _isGameOver.value = true
+                    _statusText.value = "Game Over! All your ships have been sunk!"
+                    return
                 }
             } else {
                 _statusText.value = "Enemy missed at (${response.x}, ${response.y})! Your turn."
@@ -360,11 +381,22 @@ class BattleshipViewModel : ViewModel() {
             return
         }
 
+        if (!_bothPlayersConnected.value!!) {
+            _error.value = "Waiting for opponent to join"
+            return
+        }
+
         // Check if we've already fired at these coordinates
         val alreadyFired = (_playerHits.value?.any { it.x == x && it.y == y } ?: false) ||
                           (_playerMisses.value?.any { it.x == x && it.y == y } ?: false)
         if (alreadyFired) {
             _error.value = "You've already fired at these coordinates"
+            return
+        }
+
+        // Validate coordinates
+        if (x !in 0..9 || y !in 0..9) {
+            _error.value = "Invalid coordinates. Must be between 0 and 9."
             return
         }
 
@@ -374,71 +406,80 @@ class BattleshipViewModel : ViewModel() {
                 withTimeout(longPollingTimeout) {
                     repository.fire(player, gameKey, x, y).fold(
                         onSuccess = { response ->
-                            val position = Position(x, y)
-                            if (response.hit) {
-                                val currentHits = _playerHits.value.orEmpty().toMutableList()
-                                currentHits.add(position)
-                                _playerHits.value = currentHits
-
-                                if (response.shipsSunk.isNotEmpty()) {
-                                    val currentSunkShips = _sunkShips.value.orEmpty().toMutableList()
-                                    currentSunkShips.addAll(response.shipsSunk)
-                                    _sunkShips.value = currentSunkShips
-
-                                    if (currentSunkShips.size == BattleshipGame.SHIP_TYPES.size) {
-                                        _isGameOver.value = true
-                                        _statusText.value = "Congratulations! You've won the game by sinking all enemy ships!"
-                                    } else {
-                                        _statusText.value = buildString {
-                                            append("Hit and sunk ${response.shipsSunk.joinToString()}!")
-                                            append(" Ships remaining: ${BattleshipGame.SHIP_TYPES.size - currentSunkShips.size}")
-                                            append(" Waiting for opponent...")
-                                        }
-                                    }
-                                } else {
-                                    _statusText.value = "Hit! Waiting for opponent..."
-                                }
-                            } else {
-                                val currentMisses = _playerMisses.value.orEmpty().toMutableList()
-                                currentMisses.add(position)
-                                _playerMisses.value = currentMisses
-                                _statusText.value = "Miss! Waiting for opponent..."
-                            }
-                            
-                            _isMyTurn.value = false
-                            // Explicitly start listening for enemy fire after our turn
-                            startListeningForEnemyFire()
+                            handleFireResponse(response, Position(x, y))
                         },
                         onFailure = { exception ->
-                            Log.e(TAG, "Fire error: ${exception.message}")
-                            when (exception.message) {
-                                BattleshipRepository.ERROR_NOT_YOUR_TURN -> {
-                                    _error.value = "Not your turn"
-                                    _statusText.value = "Wait for your turn"
-                                    _isMyTurn.value = false
-                                    // Start listening since it's not our turn
-                                    startListeningForEnemyFire()
-                                }
-                                BattleshipRepository.ERROR_INVALID_COORDINATES -> {
-                                    _error.value = "Invalid coordinates"
-                                }
-                                BattleshipRepository.ERROR_GAME_NOT_FOUND -> {
-                                    _error.value = "Game session has expired"
-                                    _isGameOver.value = true
-                                    _statusText.value = "Game ended - session expired"
-                                }
-                                else -> handleNetworkError(exception)
-                            }
+                            handleFireError(exception)
                         }
                     )
                 }
-            } catch (e: TimeoutCancellationException) {
-                Log.e(TAG, "Fire timeout: ${e.message}")
-                _error.value = "Server request timed out. Please try again."
             } catch (e: Exception) {
-                if (e is CancellationException) throw e
-                Log.e(TAG, "Fire error: ${e.message}")
-                handleNetworkError(e)
+                handleFireError(e)
+            }
+        }
+    }
+
+    private fun handleFireResponse(response: FireResponse, position: Position) {
+        if (response.hit) {
+            val currentHits = _playerHits.value.orEmpty().toMutableList()
+            currentHits.add(position)
+            _playerHits.value = currentHits
+
+            if (response.shipsSunk.isNotEmpty()) {
+                val currentSunkShips = _sunkShips.value.orEmpty().toMutableList()
+                currentSunkShips.addAll(response.shipsSunk)
+                _sunkShips.value = currentSunkShips
+
+                if (currentSunkShips.size == BattleshipGame.SHIP_TYPES.size) {
+                    _isGameOver.value = true
+                    _statusText.value = "Congratulations! You've won the game by sinking all enemy ships!"
+                } else {
+                    _statusText.value = buildString {
+                        append("Hit and sunk ${response.shipsSunk.joinToString()}!")
+                        append(" Ships remaining: ${BattleshipGame.SHIP_TYPES.size - currentSunkShips.size}")
+                        append(" Waiting for opponent...")
+                    }
+                }
+            } else {
+                _statusText.value = "Hit! Waiting for opponent..."
+            }
+        } else {
+            val currentMisses = _playerMisses.value.orEmpty().toMutableList()
+            currentMisses.add(position)
+            _playerMisses.value = currentMisses
+            _statusText.value = "Miss! Waiting for opponent..."
+        }
+        
+        _isMyTurn.value = false
+        // Explicitly start listening for enemy fire after our turn
+        startListeningForEnemyFire()
+    }
+
+    private fun handleFireError(exception: Throwable) {
+        Log.e(TAG, "Fire error: ${exception.message}")
+        when (exception) {
+            is TimeoutCancellationException -> {
+                _error.value = "Server request timed out. Please try again."
+            }
+            is CancellationException -> throw exception
+            else -> {
+                when (exception.message) {
+                    BattleshipRepository.ERROR_NOT_YOUR_TURN -> {
+                        _error.value = "Not your turn"
+                        _statusText.value = "Wait for your turn"
+                        _isMyTurn.value = false
+                        startListeningForEnemyFire()
+                    }
+                    BattleshipRepository.ERROR_INVALID_COORDINATES -> {
+                        _error.value = "Invalid coordinates"
+                    }
+                    BattleshipRepository.ERROR_GAME_NOT_FOUND -> {
+                        _error.value = "Game session has expired"
+                        _isGameOver.value = true
+                        _statusText.value = "Game ended - session expired"
+                    }
+                    else -> handleNetworkError(exception)
+                }
             }
         }
     }
@@ -451,7 +492,7 @@ class BattleshipViewModel : ViewModel() {
             retryCount++
             _statusText.value = "Connection issue, retrying... (Attempt $retryCount/$maxRetries)"
             viewModelScope.launch {
-                delay(pollingDelay * retryCount) // Exponential backoff
+                delay(pollingDelay * retryCount)
                 if (!_isMyTurn.value!!) {
                     startListeningForEnemyFire()
                 }
