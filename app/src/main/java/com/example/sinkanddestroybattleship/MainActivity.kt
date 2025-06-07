@@ -13,6 +13,8 @@ import com.example.sinkanddestroybattleship.data.models.Ship
 import com.example.sinkanddestroybattleship.data.models.ShipType
 import com.example.sinkanddestroybattleship.data.network.ConnectionTest
 import com.example.sinkanddestroybattleship.databinding.ActivityMainBinding
+import com.example.sinkanddestroybattleship.game.BattleshipGame
+import com.example.sinkanddestroybattleship.game.Ship
 import com.example.sinkanddestroybattleship.ui.viewmodel.BattleshipViewModel
 import kotlinx.coroutines.launch
 
@@ -22,7 +24,7 @@ class MainActivity : AppCompatActivity() {
     private val battleshipGame = BattleshipGame()
     
     private val ships = mutableListOf<Ship>()
-    private var currentOrientation = "horizontal"
+    private var currentRotation = false // false = horizontal, true = vertical
     private var isPlacingShips = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -79,8 +81,8 @@ class MainActivity : AppCompatActivity() {
         binding.rotateButton.setOnClickListener {
             if (!isPlacingShips) return@setOnClickListener
             
-            currentOrientation = if (currentOrientation == "horizontal") "vertical" else "horizontal"
-            Toast.makeText(this, "Orientation: $currentOrientation", Toast.LENGTH_SHORT).show()
+            currentRotation = !currentRotation
+            Toast.makeText(this, "Orientation: ${if (currentRotation) "vertical" else "horizontal"}", Toast.LENGTH_SHORT).show()
             
             // Update preview if we're hovering over a cell
             binding.playerBoard.lastHoverPosition?.let { position ->
@@ -104,7 +106,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateShipPlacementPreview(position: Position) {
         val nextShip = battleshipGame.getNextShipToPlace(ships)
         if (nextShip != null) {
-            val previewShip = Ship(currentOrientation, position.x, nextShip.name, position.y)
+            val previewShip = Ship(currentRotation, position.x, nextShip.name, position.y)
             val previewCells = battleshipGame.calculateShipCells(previewShip)
             val isValid = battleshipGame.isValidPlacement(previewShip, ships)
             binding.playerBoard.setPreview(previewCells, isValid)
@@ -120,7 +122,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val ship = Ship(currentOrientation, position.x, nextShip.name, position.y)
+        val ship = Ship(currentRotation, position.x, nextShip.name, position.y)
         
         if (battleshipGame.isValidPlacement(ship, ships)) {
             ships.add(ship)
@@ -176,77 +178,81 @@ class MainActivity : AppCompatActivity() {
             if (gameKey.isNotBlank() && playerId.isNotBlank()) {
                 binding.startGameButton.isEnabled = false
                 binding.statusText.text = "Joining game..."
-                lifecycleScope.launch {
-                    viewModel.joinGame(playerId, gameKey, ships)
-                }
+                viewModel.joinGame(playerId, gameKey, ships)
             }
         }
 
         binding.opponentBoard.setOnCellClickListener { position ->
-            if (viewModel.isMyTurn.value == true) {
-                lifecycleScope.launch {
-                    viewModel.fire(position.x, position.y)
-                }
-            } else {
-                Toast.makeText(this, "Not your turn!", Toast.LENGTH_SHORT).show()
-            }
+            viewModel.fire(position.x, position.y)
         }
     }
 
     private fun observeViewModel() {
-        viewModel.playerShips.observe(this) { ships ->
-            binding.playerBoard.setShips(ships)
-        }
+        viewModel.gameState.observe(this) { state ->
+            // Update ship and shot displays
+            binding.playerBoard.setShips(state.playerShips)
+            binding.playerBoard.setShots(state.enemyShots, false)
+            binding.opponentBoard.setShots(state.playerHits, true)
+            binding.opponentBoard.setShots(state.playerMisses, true)
 
-        viewModel.enemyShots.observe(this) { shots ->
-            binding.playerBoard.setShots(shots, false)
-        }
+            // Update UI based on game phase
+            when (state.phase) {
+                BattleshipViewModel.GamePhase.SETUP -> {
+                    binding.shipPlacementControls.visibility = View.VISIBLE
+                    binding.gameIdInput.isEnabled = true
+                    binding.playerIdInput.isEnabled = true
+                    binding.joinGameButton.isEnabled = true
+                    binding.startGameButton.visibility = View.GONE
+                }
+                BattleshipViewModel.GamePhase.WAITING -> {
+                    binding.shipPlacementControls.visibility = View.VISIBLE
+                    binding.gameIdInput.isEnabled = false
+                    binding.playerIdInput.isEnabled = false
+                    binding.joinGameButton.isEnabled = false
+                    binding.startGameButton.visibility = View.GONE
+                }
+                BattleshipViewModel.GamePhase.PLAYING -> {
+                    binding.shipPlacementControls.visibility = View.GONE
+                    binding.gameIdInput.isEnabled = false
+                    binding.playerIdInput.isEnabled = false
+                    binding.joinGameButton.isEnabled = false
+                    binding.startGameButton.visibility = View.GONE
+                    binding.opponentBoard.isEnabled = state.isMyTurn
+                }
+                BattleshipViewModel.GamePhase.FINISHED -> {
+                    binding.shipPlacementControls.visibility = View.GONE
+                    binding.opponentBoard.isEnabled = false
+                    binding.startGameButton.visibility = View.GONE
+                }
+            }
 
-        viewModel.playerHits.observe(this) { hits ->
-            binding.opponentBoard.setShots(hits, true)
-        }
-
-        viewModel.playerMisses.observe(this) { misses ->
-            binding.opponentBoard.setShots(misses, true)
+            // Update opponent board click handling based on turn
+            if (state.isMyTurn && state.phase == BattleshipViewModel.GamePhase.PLAYING) {
+                binding.opponentBoard.setOnCellClickListener { position ->
+                    viewModel.fire(position.x, position.y)
+                }
+            } else {
+                binding.opponentBoard.setOnCellClickListener(null)
+            }
         }
 
         viewModel.statusText.observe(this) { status ->
             binding.statusText.text = status
         }
 
-        viewModel.isMyTurn.observe(this) { isMyTurn ->
-            binding.opponentBoard.isEnabled = isMyTurn
-            if (isMyTurn) {
-                binding.opponentBoard.setOnCellClickListener { position ->
-                    lifecycleScope.launch {
-                        viewModel.fire(position.x, position.y)
-                    }
-                }
-            } else {
-                binding.opponentBoard.setOnCellClickListener(null)
-            }
-        }
-
-        viewModel.isGameOver.observe(this) { isGameOver ->
-            if (isGameOver) {
-                binding.opponentBoard.setOnCellClickListener(null)
-                binding.opponentBoard.isEnabled = false
-            }
-        }
-
         viewModel.error.observe(this) { error ->
             Toast.makeText(this, error, Toast.LENGTH_LONG).show()
-            if (error.contains("Game not initialized")) {
-                resetGameState()
+        }
+
+        viewModel.isWaitingForOpponent.observe(this) { waiting ->
+            if (waiting) {
+                binding.statusText.text = "Waiting for opponent to join..."
             }
         }
 
-        viewModel.gameJoined.observe(this) { joined ->
-            if (joined) {
+        viewModel.bothPlayersConnected.observe(this) { connected ->
+            if (connected) {
                 binding.shipPlacementControls.visibility = View.GONE
-                binding.gameIdInput.isEnabled = false
-                binding.playerIdInput.isEnabled = false
-                binding.startGameButton.visibility = View.GONE
                 isPlacingShips = false
             }
         }
