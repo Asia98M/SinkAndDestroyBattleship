@@ -5,108 +5,81 @@ import com.example.sinkanddestroybattleship.data.models.*
 import com.example.sinkanddestroybattleship.data.network.NetworkModule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import retrofit2.Response
 
 class BattleshipRepository {
     private val api = NetworkModule.battleshipApi
     private val TAG = "BattleshipRepository"
 
-    suspend fun ping(): Result<Boolean> = withContext(Dispatchers.IO) {
+    private suspend fun <T> handleApiResponse(
+        apiCall: suspend () -> Response<T>,
+        errorContext: String
+    ): Result<T> = withContext(Dispatchers.IO) {
         try {
-            val response = api.ping()
-            Log.d(TAG, "Ping response: ${response.raw()}")
-            if (response.isSuccessful) {
-                Result.success(response.body()?.ping == true)
-            } else {
-                val error = parseError(response.errorBody()?.string())
-                Log.e(TAG, "Ping error: $error")
-                Result.failure(Exception(error))
+            val response = apiCall()
+            Log.d(TAG, "$errorContext response: ${response.raw()}")
+            
+            when (response.code()) {
+                200 -> {
+                    // Even with 200, we need to check for error in body
+                    response.body()?.let { body ->
+                        // If the body is EnemyFireResponse or FireResponse, check for error field
+                        when (body) {
+                            is EnemyFireResponse -> {
+                                if (body.error != null) {
+                                    Log.e(TAG, "$errorContext error in body: ${body.error}")
+                                    Result.failure(Exception(body.error))
+                                } else {
+                                    Result.success(body)
+                                }
+                            }
+                            else -> Result.success(body)
+                        }
+                    } ?: run {
+                        Log.e(TAG, "$errorContext empty response body")
+                        Result.failure(Exception("Server returned empty response"))
+                    }
+                }
+                418 -> {
+                    val error = "Invalid API endpoint or request format"
+                    Log.e(TAG, "$errorContext error (418): $error")
+                    Result.failure(Exception(error))
+                }
+                else -> {
+                    val errorBody = parseError(response.errorBody()?.string())
+                    Log.e(TAG, "$errorContext error (${response.code()}): $errorBody")
+                    Result.failure(Exception(errorBody))
+                }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Ping exception: ${e.message}")
+            Log.e(TAG, "$errorContext exception: ${e.message}")
             Result.failure(e)
         }
     }
 
-    suspend fun joinGame(player: String, gameKey: String, ships: List<Ship>): Result<EnemyFireResponse> = 
-        withContext(Dispatchers.IO) {
-            try {
-                val request = JoinGameRequest(player, gameKey, ships)
-                Log.d(TAG, "Join game request: $request")
-                val response = api.joinGame(request)
-                Log.d(TAG, "Join game response: ${response.raw()}")
-                
-                if (response.isSuccessful) {
-                    response.body()?.let {
-                        Log.d(TAG, "Join game success: $it")
-                        Result.success(it)
-                    } ?: run {
-                        Log.e(TAG, "Join game empty response")
-                        Result.failure(Exception("Server returned empty response"))
-                    }
-                } else {
-                    val error = parseError(response.errorBody()?.string())
-                    Log.e(TAG, "Join game error: $error")
-                    Result.failure(Exception(error))
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Join game exception: ${e.message}")
-                Result.failure(e)
-            }
-        }
+    suspend fun ping(): Result<Boolean> = 
+        handleApiResponse(
+            apiCall = { api.ping() },
+            errorContext = "Ping"
+        ).map { it.ping == true }
 
-    suspend fun fire(player: String, gameKey: String, x: Int, y: Int): Result<FireResponse> = 
-        withContext(Dispatchers.IO) {
-            try {
-                val request = FireRequest(player, gameKey, x, y)
-                Log.d(TAG, "Fire request: $request")
-                val response = api.fire(request)
-                Log.d(TAG, "Fire response: ${response.raw()}")
-                
-                if (response.isSuccessful) {
-                    response.body()?.let {
-                        Log.d(TAG, "Fire success: $it")
-                        Result.success(it)
-                    } ?: run {
-                        Log.e(TAG, "Fire empty response")
-                        Result.failure(Exception("Server returned empty response"))
-                    }
-                } else {
-                    val error = parseError(response.errorBody()?.string())
-                    Log.e(TAG, "Fire error: $error")
-                    Result.failure(Exception(error))
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Fire exception: ${e.message}")
-                Result.failure(e)
-            }
-        }
+    suspend fun joinGame(player: String, gameKey: String, ships: List<Ship>): Result<EnemyFireResponse> =
+        handleApiResponse(
+            apiCall = { api.joinGame(JoinGameRequest(player, gameKey, ships)) },
+            errorContext = "Join game"
+        )
 
-    suspend fun enemyFire(player: String, gameKey: String): Result<EnemyFireResponse> = 
-        withContext(Dispatchers.IO) {
-            try {
-                val request = EnemyFireRequest(player, gameKey)
-                Log.d(TAG, "Enemy fire request: $request")
-                val response = api.enemyFire(request)
-                Log.d(TAG, "Enemy fire response: ${response.raw()}")
-                
-                if (response.isSuccessful) {
-                    response.body()?.let {
-                        Log.d(TAG, "Enemy fire success: $it")
-                        Result.success(it)
-                    } ?: run {
-                        Log.e(TAG, "Enemy fire empty response")
-                        Result.failure(Exception("Server returned empty response"))
-                    }
-                } else {
-                    val error = parseError(response.errorBody()?.string())
-                    Log.e(TAG, "Enemy fire error: $error")
-                    Result.failure(Exception(error))
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Enemy fire exception: ${e.message}")
-                Result.failure(e)
-            }
-        }
+    suspend fun fire(player: String, gameKey: String, x: Int, y: Int): Result<FireResponse> =
+        handleApiResponse(
+            apiCall = { api.fire(FireRequest(player, gameKey, x, y)) },
+            errorContext = "Fire"
+        )
+
+    suspend fun enemyFire(player: String, gameKey: String): Result<EnemyFireResponse> =
+        handleApiResponse(
+            apiCall = { api.enemyFire(EnemyFireRequest(player, gameKey)) },
+            errorContext = "Enemy fire"
+        )
 
     private fun parseError(errorBody: String?): String {
         return try {

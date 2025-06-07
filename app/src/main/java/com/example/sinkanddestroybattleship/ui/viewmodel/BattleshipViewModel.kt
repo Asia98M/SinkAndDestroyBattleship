@@ -58,6 +58,21 @@ class BattleshipViewModel : ViewModel() {
 
     @SuppressLint("NullSafeMutableLiveData")
     fun joinGame(player: String, gameKey: String, ships: List<Ship>) {
+        // Validate IDs first
+        val battleshipGame = BattleshipGame()
+        val idError = battleshipGame.validateIds(player, gameKey)
+        if (idError != null) {
+            _error.value = idError
+            return
+        }
+
+        // Validate ship placement
+        val shipError = battleshipGame.validateShipPlacement(ships)
+        if (shipError != null) {
+            _error.value = shipError
+            return
+        }
+
         currentPlayer = player
         currentGameKey = gameKey
         _playerShips.value = ships
@@ -93,6 +108,27 @@ class BattleshipViewModel : ViewModel() {
         val gameKey = currentGameKey
         if (player == null || gameKey == null) {
             _error.value = "Game not initialized"
+            return
+        }
+
+        // Validate move coordinates
+        val moveError = BattleshipGame().validateMove(x, y)
+        if (moveError != null) {
+            _error.value = moveError
+            return
+        }
+
+        // Check if it's our turn
+        if (_isMyTurn.value != true) {
+            _error.value = "Not your turn"
+            return
+        }
+
+        // Check if we've already fired at these coordinates
+        val alreadyFired = (_playerHits.value?.any { it.x == x && it.y == y } ?: false) ||
+                          (_playerMisses.value?.any { it.x == x && it.y == y } ?: false)
+        if (alreadyFired) {
+            _error.value = "You've already fired at these coordinates"
             return
         }
 
