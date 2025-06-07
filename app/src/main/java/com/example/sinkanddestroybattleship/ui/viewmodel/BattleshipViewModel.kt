@@ -128,17 +128,94 @@ class BattleshipViewModel : ViewModel() {
         }
 
         // If x and y are null, we're the first player (it's our turn)
-        // If x and y are set, we're the second player (opponent's turn)
+        // If x and y are set, we're the second player and we need to process their first shot
         val isFirstPlayer = response.x == null && response.y == null
         _isMyTurn.value = isFirstPlayer
         
         if (isFirstPlayer) {
-            _statusText.value = "Waiting for opponent to join..."
+            _statusText.value = "You go first! Make your move."
         } else {
-            handleEnemyFireResponse(response)
+            // Process the opponent's first shot
+            handleEnemyShot(response)
         }
 
+        // Start listening for enemy moves
         startListeningForEnemyFire()
+    }
+
+    private fun handleEnemyShot(response: EnemyFireResponse) {
+        if (response.x != null && response.y != null) {
+            val currentShots = _enemyShots.value.orEmpty().toMutableList()
+            val position = Position(response.x, response.y)
+            currentShots.add(position)
+            _enemyShots.value = currentShots
+            
+            // Check if the shot hit one of our ships
+            val hitShip = _playerShips.value?.any { ship ->
+                val shipCells = BattleshipGame().calculateShipCells(ship)
+                shipCells.any { it.x == response.x && it.y == response.y }
+            } ?: false
+
+            _statusText.value = if (hitShip) {
+                "Enemy hit your ship at (${response.x}, ${response.y})! Your turn."
+            } else {
+                "Enemy missed at (${response.x}, ${response.y})! Your turn."
+            }
+            _isMyTurn.value = true
+        }
+    }
+
+    private fun startListeningForEnemyFire() {
+        enemyFireJob?.cancel()
+        enemyFireJob = viewModelScope.launch {
+            val player = currentPlayer
+            val gameKey = currentGameKey
+            if (player == null || gameKey == null) {
+                _error.value = "Game not initialized"
+                return@launch
+            }
+
+            _isGameOver.value = false // Initialize to false
+            while (_isGameOver.value == false) {
+                if (_isMyTurn.value == true) {
+                    // If it's our turn, don't poll for enemy moves
+                    delay(1000)
+                    continue
+                }
+
+                try {
+                    _statusText.value = "Waiting for opponent's move..."
+                    repository.enemyFire(player, gameKey).fold(
+                        onSuccess = { response ->
+                            retryCount = 0
+                            if (response.gameover) {
+                                _isGameOver.value = true
+                                _statusText.value = "Game Over!"
+                                return@launch
+                            }
+                            
+                            handleEnemyShot(response)
+                        },
+                        onFailure = { exception ->
+                            when (exception.message) {
+                                BattleshipRepository.ERROR_GAME_NOT_FOUND,
+                                BattleshipRepository.ERROR_INVALID_GAME -> {
+                                    _error.value = "Game session has ended"
+                                    _isGameOver.value = true
+                                    _statusText.value = "Game ended - session expired"
+                                    return@launch
+                                }
+                                else -> handleNetworkError(exception)
+                            }
+                        }
+                    )
+                } catch (e: Exception) {
+                    handleNetworkError(e)
+                }
+
+                delay(1000) // Small delay between polls
+            }
+        }
     }
 
     fun fire(x: Int, y: Int) {
@@ -170,6 +247,7 @@ class BattleshipViewModel : ViewModel() {
         }
 
         viewModelScope.launch {
+            _statusText.value = "Firing at (${x}, ${y})..."
             repository.fire(player, gameKey, x, y).fold(
                 onSuccess = { response ->
                     val position = Position(x, y)
@@ -177,19 +255,18 @@ class BattleshipViewModel : ViewModel() {
                         val currentHits = _playerHits.value.orEmpty().toMutableList()
                         currentHits.add(position)
                         _playerHits.value = currentHits
-                        _error.value = if (response.shipsSunk.isNotEmpty()) {
-                            "Hit and sunk ${response.shipsSunk.joinToString()}!"
+                        _statusText.value = if (response.shipsSunk.isNotEmpty()) {
+                            "Hit and sunk ${response.shipsSunk.joinToString()}! Waiting for opponent..."
                         } else {
-                            "Hit!"
+                            "Hit! Waiting for opponent..."
                         }
                     } else {
                         val currentMisses = _playerMisses.value.orEmpty().toMutableList()
                         currentMisses.add(position)
                         _playerMisses.value = currentMisses
-                        _error.value = "Miss!"
+                        _statusText.value = "Miss! Waiting for opponent..."
                     }
                     _isMyTurn.value = false
-                    _statusText.value = "Waiting for opponent's move..."
                 },
                 onFailure = { exception ->
                     when (exception.message) {
@@ -212,42 +289,6 @@ class BattleshipViewModel : ViewModel() {
                     }
                 }
             )
-        }
-    }
-
-    private fun startListeningForEnemyFire() {
-        enemyFireJob?.cancel()
-        enemyFireJob = viewModelScope.launch {
-            val player = currentPlayer
-            val gameKey = currentGameKey
-            if (player == null || gameKey == null) {
-                _error.value = "Game not initialized"
-                return@launch
-            }
-
-            _isGameOver.value = false // Initialize to false
-            while (_isGameOver.value == false) { // Safe null check
-                repository.enemyFire(player, gameKey).fold(
-                    onSuccess = { response ->
-                        retryCount = 0
-                        handleEnemyFireResponse(response)
-                        if (!response.gameover) {
-                            delay(1000) // Add a small delay before next poll
-                        }
-                    },
-                    onFailure = { exception ->
-                        when (exception.message) {
-                            BattleshipRepository.ERROR_GAME_NOT_FOUND,
-                            BattleshipRepository.ERROR_INVALID_GAME -> {
-                                _error.value = "Game session has ended"
-                                _isGameOver.value = true
-                                _statusText.value = "Game ended - session expired"
-                            }
-                            else -> handleNetworkError(exception)
-                        }
-                    }
-                )
-            }
         }
     }
 
@@ -285,43 +326,6 @@ class BattleshipViewModel : ViewModel() {
             }
         } else if (retryCount >= maxRetries) {
             _error.value = "Connection lost after $maxRetries retries"
-            _isGameOver.value = true
-        }
-    }
-
-    private fun handleEnemyFireResponse(response: EnemyFireResponse) {
-        _isGameOver.value = response.gameover
-        if (!response.gameover) {
-            // Check if we have actual coordinates (a shot was made)
-            if (response.x != null && response.y != null) {
-                val currentShots = _enemyShots.value.orEmpty().toMutableList()
-                val position = Position(response.x, response.y)
-                currentShots.add(position)
-                _enemyShots.value = currentShots
-                
-                // Check if the shot hit one of our ships
-                val hitShip = _playerShips.value?.any { ship ->
-                    val shipCells = BattleshipGame().calculateShipCells(ship)
-                    shipCells.any { it.x == response.x && it.y == response.y }
-                } ?: false
-
-                _error.value = if (hitShip) "Enemy hit your ship!" else "Enemy missed!"
-                _isMyTurn.value = true
-                _statusText.value = "Your turn! Make your move."
-            } else {
-                // No shot coordinates means we're waiting for opponent
-                if (_gameJoined.value == true) {
-                    if (_isMyTurn.value == true) {
-                        _statusText.value = "Your turn! Make your move."
-                    } else {
-                        _statusText.value = "Waiting for opponent's move..."
-                    }
-                } else {
-                    _statusText.value = "Waiting for opponent to join..."
-                }
-            }
-        } else {
-            _statusText.value = "Game Over!"
             _isGameOver.value = true
         }
     }
