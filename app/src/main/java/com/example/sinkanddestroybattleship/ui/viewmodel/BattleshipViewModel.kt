@@ -11,6 +11,9 @@ import com.example.sinkanddestroybattleship.data.repository.BattleshipRepository
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.CancellationException
 
 class BattleshipViewModel : ViewModel() {
     private val repository = BattleshipRepository()
@@ -47,6 +50,8 @@ class BattleshipViewModel : ViewModel() {
     private var enemyFireJob: Job? = null
     private var retryCount = 0
     private val maxRetries = 3
+    private val pollingDelay = 1000L // 1 second
+    private val longPollingTimeout = 30000L // 30 seconds
 
     private val _statusText = MutableLiveData<String>()
     val statusText: LiveData<String> = _statusText
@@ -175,45 +180,64 @@ class BattleshipViewModel : ViewModel() {
                 return@launch
             }
 
-            _isGameOver.value = false // Initialize to false
-            while (_isGameOver.value == false) {
+            _isGameOver.value = false
+            while (!_isGameOver.value!!) {
                 if (_isMyTurn.value == true) {
-                    // If it's our turn, don't poll for enemy moves
-                    delay(1000)
+                    // Even when it's our turn, keep the connection alive with less frequent polls
+                    delay(pollingDelay)
                     continue
                 }
 
                 try {
                     _statusText.value = "Waiting for opponent's move..."
-                    repository.enemyFire(player, gameKey).fold(
-                        onSuccess = { response ->
-                            retryCount = 0
-                            if (response.gameover) {
-                                _isGameOver.value = true
-                                _statusText.value = "Game Over!"
-                                return@launch
-                            }
-                            
-                            handleEnemyShot(response)
-                        },
-                        onFailure = { exception ->
-                            when (exception.message) {
-                                BattleshipRepository.ERROR_GAME_NOT_FOUND,
-                                BattleshipRepository.ERROR_INVALID_GAME -> {
-                                    _error.value = "Game session has ended"
+                    withTimeout(longPollingTimeout) {
+                        repository.enemyFire(player, gameKey).fold(
+                            onSuccess = { response ->
+                                retryCount = 0 // Reset retry count on successful response
+                                
+                                if (response.gameover) {
                                     _isGameOver.value = true
-                                    _statusText.value = "Game ended - session expired"
-                                    return@launch
+                                    _statusText.value = "Game Over!"
+                                    return@fold
                                 }
-                                else -> handleNetworkError(exception)
+                                
+                                handleEnemyShot(response)
+                            },
+                            onFailure = { exception ->
+                                when (exception.message) {
+                                    BattleshipRepository.ERROR_GAME_NOT_FOUND,
+                                    BattleshipRepository.ERROR_INVALID_GAME -> {
+                                        _error.value = "Game session has ended"
+                                        _isGameOver.value = true
+                                        _statusText.value = "Game ended - session expired"
+                                        return@fold
+                                    }
+                                    else -> {
+                                        if (retryCount < maxRetries) {
+                                            retryCount++
+                                            _statusText.value = "Connection issue, retrying... (Attempt $retryCount/$maxRetries)"
+                                            delay(pollingDelay * retryCount) // Exponential backoff
+                                        } else {
+                                            handleNetworkError(exception)
+                                            _error.value = "Lost connection to server. Please rejoin the game."
+                                            _isGameOver.value = true
+                                            return@fold
+                                        }
+                                    }
+                                }
                             }
-                        }
-                    )
+                        )
+                    }
+                } catch (e: TimeoutCancellationException) {
+                    // Handle long polling timeout by simply continuing the loop
+                    continue
                 } catch (e: Exception) {
+                    if (e is CancellationException) throw e
                     handleNetworkError(e)
                 }
 
-                delay(1000) // Small delay between polls
+                // Small delay between polls to prevent overwhelming the server
+                delay(pollingDelay)
             }
         }
     }
@@ -226,7 +250,6 @@ class BattleshipViewModel : ViewModel() {
             return
         }
 
-        // Check if it's our turn
         if (_isMyTurn.value != true) {
             _error.value = "Not your turn"
             return
@@ -240,55 +263,63 @@ class BattleshipViewModel : ViewModel() {
             return
         }
 
-        // Validate coordinates are within grid
-        if (x !in 0..9 || y !in 0..9) {
-            _error.value = "Coordinates must be between 0 and 9"
-            return
-        }
-
         viewModelScope.launch {
-            _statusText.value = "Firing at (${x}, ${y})..."
-            repository.fire(player, gameKey, x, y).fold(
-                onSuccess = { response ->
-                    val position = Position(x, y)
-                    if (response.hit) {
-                        val currentHits = _playerHits.value.orEmpty().toMutableList()
-                        currentHits.add(position)
-                        _playerHits.value = currentHits
-                        _statusText.value = if (response.shipsSunk.isNotEmpty()) {
-                            "Hit and sunk ${response.shipsSunk.joinToString()}! Waiting for opponent..."
-                        } else {
-                            "Hit! Waiting for opponent..."
+            try {
+                _statusText.value = "Firing at (${x}, ${y})..."
+                withTimeout(longPollingTimeout) {
+                    repository.fire(player, gameKey, x, y).fold(
+                        onSuccess = { response ->
+                            val position = Position(x, y)
+                            if (response.hit) {
+                                val currentHits = _playerHits.value.orEmpty().toMutableList()
+                                currentHits.add(position)
+                                _playerHits.value = currentHits
+                                _statusText.value = if (response.shipsSunk.isNotEmpty()) {
+                                    "Hit and sunk ${response.shipsSunk.joinToString()}! Waiting for opponent..."
+                                } else {
+                                    "Hit! Waiting for opponent..."
+                                }
+                            } else {
+                                val currentMisses = _playerMisses.value.orEmpty().toMutableList()
+                                currentMisses.add(position)
+                                _playerMisses.value = currentMisses
+                                _statusText.value = "Miss! Waiting for opponent..."
+                            }
+                            _isMyTurn.value = false
+                            
+                            // Immediately start checking for enemy's move
+                            retryCount = 0
+                        },
+                        onFailure = { exception ->
+                            when (exception.message) {
+                                BattleshipRepository.ERROR_NOT_YOUR_TURN -> {
+                                    _error.value = "Not your turn"
+                                    _statusText.value = "Wait for your turn"
+                                    _isMyTurn.value = false
+                                }
+                                BattleshipRepository.ERROR_INVALID_COORDINATES -> {
+                                    _error.value = "Invalid coordinates"
+                                }
+                                BattleshipRepository.ERROR_GAME_NOT_FOUND -> {
+                                    _error.value = "Game session has expired"
+                                    _isGameOver.value = true
+                                    _statusText.value = "Game ended - session expired"
+                                }
+                                else -> {
+                                    handleNetworkError(exception)
+                                    _error.value = "Connection error. Please try again."
+                                }
+                            }
                         }
-                    } else {
-                        val currentMisses = _playerMisses.value.orEmpty().toMutableList()
-                        currentMisses.add(position)
-                        _playerMisses.value = currentMisses
-                        _statusText.value = "Miss! Waiting for opponent..."
-                    }
-                    _isMyTurn.value = false
-                },
-                onFailure = { exception ->
-                    when (exception.message) {
-                        BattleshipRepository.ERROR_NOT_YOUR_TURN -> {
-                            _error.value = "Not your turn"
-                            _statusText.value = "Wait for your turn"
-                        }
-                        BattleshipRepository.ERROR_INVALID_COORDINATES -> {
-                            _error.value = "Invalid coordinates"
-                        }
-                        BattleshipRepository.ERROR_GAME_NOT_FOUND -> {
-                            _error.value = "Game session has expired"
-                            _isGameOver.value = true
-                            _statusText.value = "Game ended - session expired"
-                        }
-                        else -> {
-                            _error.value = exception.message
-                            _statusText.value = "Error occurred during your move"
-                        }
-                    }
+                    )
                 }
-            )
+            } catch (e: TimeoutCancellationException) {
+                _error.value = "Server request timed out. Please try again."
+            } catch (e: Exception) {
+                if (e is CancellationException) throw e
+                handleNetworkError(e)
+                _error.value = "Connection error. Please try again."
+            }
         }
     }
 
