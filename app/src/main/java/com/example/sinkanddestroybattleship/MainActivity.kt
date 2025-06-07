@@ -13,8 +13,6 @@ import com.example.sinkanddestroybattleship.data.models.Ship
 import com.example.sinkanddestroybattleship.data.models.ShipType
 import com.example.sinkanddestroybattleship.data.network.ConnectionTest
 import com.example.sinkanddestroybattleship.databinding.ActivityMainBinding
-import com.example.sinkanddestroybattleship.game.BattleshipGame
-import com.example.sinkanddestroybattleship.game.Ship
 import com.example.sinkanddestroybattleship.ui.viewmodel.BattleshipViewModel
 import kotlinx.coroutines.launch
 
@@ -24,7 +22,7 @@ class MainActivity : AppCompatActivity() {
     private val battleshipGame = BattleshipGame()
     
     private val ships = mutableListOf<Ship>()
-    private var currentRotation = false // false = horizontal, true = vertical
+    private var currentOrientation = "horizontal"
     private var isPlacingShips = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -81,8 +79,8 @@ class MainActivity : AppCompatActivity() {
         binding.rotateButton.setOnClickListener {
             if (!isPlacingShips) return@setOnClickListener
             
-            currentRotation = !currentRotation
-            Toast.makeText(this, "Orientation: ${if (currentRotation) "vertical" else "horizontal"}", Toast.LENGTH_SHORT).show()
+            currentOrientation = if (currentOrientation == "horizontal") "vertical" else "horizontal"
+            Toast.makeText(this, "Orientation: $currentOrientation", Toast.LENGTH_SHORT).show()
             
             // Update preview if we're hovering over a cell
             binding.playerBoard.lastHoverPosition?.let { position ->
@@ -106,7 +104,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateShipPlacementPreview(position: Position) {
         val nextShip = battleshipGame.getNextShipToPlace(ships)
         if (nextShip != null) {
-            val previewShip = Ship(currentRotation, position.x, nextShip.name, position.y)
+            val previewShip = Ship(currentOrientation, position.x, nextShip.name, position.y)
             val previewCells = battleshipGame.calculateShipCells(previewShip)
             val isValid = battleshipGame.isValidPlacement(previewShip, ships)
             binding.playerBoard.setPreview(previewCells, isValid)
@@ -122,7 +120,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val ship = Ship(currentRotation, position.x, nextShip.name, position.y)
+        val ship = Ship(currentOrientation, position.x, nextShip.name, position.y)
         
         if (battleshipGame.isValidPlacement(ship, ships)) {
             ships.add(ship)
