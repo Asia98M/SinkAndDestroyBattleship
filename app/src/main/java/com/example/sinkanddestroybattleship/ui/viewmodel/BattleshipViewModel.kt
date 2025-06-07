@@ -48,6 +48,12 @@ class BattleshipViewModel : ViewModel() {
     private val _sunkShips = MutableLiveData<List<String>>()
     val sunkShips: LiveData<List<String>> = _sunkShips
 
+    private val _isWaitingForOpponent = MutableLiveData<Boolean>()
+    val isWaitingForOpponent: LiveData<Boolean> = _isWaitingForOpponent
+
+    private val _bothPlayersConnected = MutableLiveData<Boolean>()
+    val bothPlayersConnected: LiveData<Boolean> = _bothPlayersConnected
+
     private var currentPlayer: String? = null
     private var currentGameKey: String? = null
     private var enemyFireJob: Job? = null
@@ -63,6 +69,8 @@ class BattleshipViewModel : ViewModel() {
         _playerHits.value = emptyList()
         _playerMisses.value = emptyList()
         _sunkShips.value = emptyList()
+        _isWaitingForOpponent.value = false
+        _bothPlayersConnected.value = false
     }
 
     suspend fun ping(): Result<Boolean> {
@@ -92,10 +100,12 @@ class BattleshipViewModel : ViewModel() {
         _playerHits.value = emptyList()
         _playerMisses.value = emptyList()
         retryCount = 0
+        _isWaitingForOpponent.value = true
+        _bothPlayersConnected.value = false
 
         viewModelScope.launch {
             try {
-                _statusText.value = "Joining game..."
+                _statusText.value = "Connecting to game..."
                 val request = JoinGameRequest(ships, gameKey, player)
                 Log.d(TAG, "Attempting to join game with request: $request")
                 
@@ -124,6 +134,8 @@ class BattleshipViewModel : ViewModel() {
         currentPlayer = null
         currentGameKey = null
         _statusText.value = "Failed to join game. Please try again."
+        _isWaitingForOpponent.value = false
+        _bothPlayersConnected.value = false
     }
 
     private fun handleJoinSuccess(response: EnemyFireResponse) {
@@ -134,6 +146,8 @@ class BattleshipViewModel : ViewModel() {
         if (response.gameover) {
             _statusText.value = "Game ended unexpectedly"
             _isGameOver.value = true
+            _isWaitingForOpponent.value = false
+            _bothPlayersConnected.value = false
             return
         }
 
@@ -143,14 +157,82 @@ class BattleshipViewModel : ViewModel() {
         _isMyTurn.value = isFirstPlayer
         
         if (isFirstPlayer) {
-            _statusText.value = "You go first! Make your move."
+            _statusText.value = "Waiting for opponent to join..."
+            _isWaitingForOpponent.value = true
+            _bothPlayersConnected.value = false
+            // Start polling for opponent connection
+            startPollingForOpponent()
         } else {
+            // Second player has joined, both players are now connected
+            _isWaitingForOpponent.value = false
+            _bothPlayersConnected.value = true
+            _statusText.value = "Both players connected! Game starting..."
             // Process the opponent's first shot
             handleEnemyShot(response)
         }
 
         // Start listening for enemy moves
         startListeningForEnemyFire()
+    }
+
+    private var opponentPollingJob: Job? = null
+    private val maxOpponentWaitTime = 300000L // 5 minutes
+
+    private fun startPollingForOpponent() {
+        opponentPollingJob?.cancel()
+        opponentPollingJob = viewModelScope.launch {
+            val startTime = System.currentTimeMillis()
+            var waitingTime = 0L
+
+            while (_isWaitingForOpponent.value == true && !_bothPlayersConnected.value!!) {
+                try {
+                    val player = currentPlayer
+                    val gameKey = currentGameKey
+                    if (player == null || gameKey == null) {
+                        _error.value = "Game not initialized"
+                        break
+                    }
+
+                    waitingTime = System.currentTimeMillis() - startTime
+                    if (waitingTime > maxOpponentWaitTime) {
+                        _error.value = "Opponent did not join within 5 minutes. Please try again."
+                        _isWaitingForOpponent.value = false
+                        break
+                    }
+
+                    _statusText.value = "Waiting for opponent to join... (${5 - waitingTime / 60000} minutes remaining)"
+                    
+                    withTimeout(longPollingTimeout) {
+                        repository.enemyFire(player, gameKey).fold(
+                            onSuccess = { response ->
+                                if (response.x != null || response.y != null) {
+                                    // Opponent has joined and made their first move
+                                    _isWaitingForOpponent.value = false
+                                    _bothPlayersConnected.value = true
+                                    _statusText.value = "Both players connected! Game starting..."
+                                    handleEnemyShot(response)
+                                    return@fold
+                                }
+                            },
+                            onFailure = { exception ->
+                                when (exception.message) {
+                                    BattleshipRepository.ERROR_GAME_NOT_FOUND -> {
+                                        _error.value = "Game session has ended"
+                                        _isWaitingForOpponent.value = false
+                                        _isGameOver.value = true
+                                        return@fold
+                                    }
+                                }
+                            }
+                        )
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    // Ignore other exceptions and continue polling
+                }
+                delay(pollingDelay)
+            }
+        }
     }
 
     private fun handleEnemyShot(response: EnemyFireResponse) {
@@ -395,6 +477,7 @@ class BattleshipViewModel : ViewModel() {
     override fun onCleared() {
         super.onCleared()
         enemyFireJob?.cancel()
+        opponentPollingJob?.cancel()
     }
 
     companion object {
