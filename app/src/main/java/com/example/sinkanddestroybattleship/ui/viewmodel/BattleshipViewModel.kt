@@ -91,11 +91,16 @@ class BattleshipViewModel : ViewModel() {
     }
 
     private fun resetGameState() {
-        _gameState.value = GameState()
+        _playerHits.value = emptyList()
+        _playerMisses.value = emptyList()
         _sunkShips.value = emptyList()
         _isWaitingForOpponent.value = false
         _bothPlayersConnected.value = false
-        _statusText.value = "Place your ships to start"
+        _isGameOver.value = false
+        _isMyTurn.value = false
+        _gameJoined.value = false
+        _enemyShots.value = emptyList()
+        retryCount = 0
     }
 
     suspend fun ping(): Result<Boolean> {
@@ -106,6 +111,10 @@ class BattleshipViewModel : ViewModel() {
     fun joinGame(player: String, gameKey: String, ships: List<Ship>) {
         // Reset game state before joining
         resetGameState()
+        
+        // Store player and game key
+        currentPlayer = player
+        currentGameKey = gameKey
         
         // Validate inputs
         val battleshipGame = BattleshipGame()
@@ -121,15 +130,10 @@ class BattleshipViewModel : ViewModel() {
             return
         }
 
-        // Update game state for setup phase
-        _gameState.value = GameState(
-            phase = GamePhase.WAITING,
-            playerName = player,
-            gameKey = gameKey,
-            playerShips = ships
-        )
+        _playerShips.value = ships
         _isWaitingForOpponent.value = true
         _statusText.value = "Joining game..."
+        _gameJoined.value = true
 
         viewModelScope.launch {
             try {
@@ -169,7 +173,7 @@ class BattleshipViewModel : ViewModel() {
         Log.d(TAG, "Join success: $response")
         
         if (response.gameover) {
-            updateGameState { it.copy(phase = GamePhase.FINISHED, isGameOver = true) }
+            _isGameOver.value = true
             _statusText.value = "Game ended unexpectedly"
             return
         }
@@ -184,25 +188,19 @@ class BattleshipViewModel : ViewModel() {
         
         when {
             response.gameover -> {
-                updateGameState { it.copy(phase = GamePhase.FINISHED, isGameOver = true) }
+                _isGameOver.value = true
                 _statusText.value = "Game ended unexpectedly"
             }
             // First player selected by server
             response.x == null && response.y == null -> {
                 Log.d(TAG, "Selected as first player")
-                updateGameState { it.copy(
-                    phase = GamePhase.PLAYING,
-                    isMyTurn = true
-                )}
+                _isMyTurn.value = true
                 _statusText.value = "You go first! Make your move."
             }
             // Second player, process first player's move
             else -> {
                 Log.d(TAG, "Selected as second player")
-                updateGameState { it.copy(
-                    phase = GamePhase.PLAYING,
-                    isMyTurn = false
-                )}
+                _isMyTurn.value = false
                 _statusText.value = "Opponent goes first. Processing their move..."
                 handleEnemyShot(response)
             }
@@ -244,55 +242,48 @@ class BattleshipViewModel : ViewModel() {
         if (response.x == null || response.y == null) return
 
         val position = Position(response.x, response.y)
-        val currentState = _gameState.value ?: return
         
         // Update enemy shots
-        val newEnemyShots = currentState.enemyShots + position
+        val currentShots = _enemyShots.value.orEmpty().toMutableList()
+        currentShots.add(position)
+        _enemyShots.value = currentShots
         
-        // Check if shot hit any of our ships
-        val hitShip = currentState.playerShips.find { ship ->
+        // Check if the shot hit one of our ships
+        val hitShip = _playerShips.value?.find { ship ->
             val shipCells = BattleshipGame().calculateShipCells(ship)
             shipCells.any { it.x == response.x && it.y == response.y }
         }
 
         if (hitShip != null) {
-            // Check if ship was sunk
+            // Check if the ship is sunk
             val shipCells = BattleshipGame().calculateShipCells(hitShip)
             val allCellsHit = shipCells.all { cell ->
-                newEnemyShots.any { shot -> shot.x == cell.x && shot.y == cell.y }
+                currentShots.any { shot -> shot.x == cell.x && shot.y == cell.y }
+            }
+
+            _statusText.value = if (allCellsHit) {
+                "Enemy sunk your ${hitShip.ship}! Your turn."
+            } else {
+                "Enemy hit your ${hitShip.ship} at (${response.x}, ${response.y})! Your turn."
             }
 
             // Check if all ships are sunk
-            val allShipsSunk = currentState.playerShips.all { ship ->
+            val allShipsSunk = _playerShips.value?.all { ship ->
                 val cells = BattleshipGame().calculateShipCells(ship)
-                cells.all { cell -> newEnemyShots.any { shot -> shot.x == cell.x && shot.y == cell.y } }
-            }
+                cells.all { cell ->
+                    currentShots.any { shot -> shot.x == cell.x && shot.y == cell.y }
+                }
+            } ?: false
 
             if (allShipsSunk) {
-                updateGameState { it.copy(
-                    enemyShots = newEnemyShots,
-                    phase = GamePhase.FINISHED,
-                    isGameOver = true
-                )}
+                _isGameOver.value = true
                 _statusText.value = "Game Over! All your ships have been sunk!"
-            } else {
-                updateGameState { it.copy(
-                    enemyShots = newEnemyShots,
-                    isMyTurn = true
-                )}
-                _statusText.value = if (allCellsHit) {
-                    "Enemy sunk your ${hitShip.ship}! Your turn."
-                } else {
-                    "Enemy hit your ${hitShip.ship} at (${response.x}, ${response.y})! Your turn."
-                }
+                return
             }
         } else {
-            updateGameState { it.copy(
-                enemyShots = newEnemyShots,
-                isMyTurn = true
-            )}
             _statusText.value = "Enemy missed at (${response.x}, ${response.y})! Your turn."
         }
+        _isMyTurn.value = true
     }
 
     private fun startGameLoop() {
@@ -524,7 +515,7 @@ class BattleshipViewModel : ViewModel() {
             _statusText.value = "Connection issue, retrying... (Attempt $retryCount/$maxRetries)"
             viewModelScope.launch {
                 delay(pollingDelay * retryCount)
-                if (!_isMyTurn.value!!) {
+                if (!_gameState.value?.isMyTurn!!) {
                     startListeningForEnemyFire()
                 }
             }
