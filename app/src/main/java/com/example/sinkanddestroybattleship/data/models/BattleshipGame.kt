@@ -2,6 +2,9 @@ package com.example.sinkanddestroybattleship.data.models
 
 class BattleshipGame {
     companion object {
+        const val BOARD_SIZE = 10
+        const val MIN_ID_LENGTH = 3  // Minimum length for player/game IDs
+
         val SHIP_TYPES = listOf(
             ShipType.Carrier,      // Size: 5
             ShipType.Battleship,   // Size: 4
@@ -39,23 +42,13 @@ class BattleshipGame {
     }
 
     fun isValidPlacement(newShip: Ship, existingShips: List<Ship>): Boolean {
-        val shipSize = ShipType.valueOf(newShip.ship).size
-        val endX = if (newShip.orientation == "horizontal") newShip.x + shipSize - 1 else newShip.x
-        val endY = if (newShip.orientation == "vertical") newShip.y + shipSize - 1 else newShip.y
-
-        // Check board boundaries
-        if (endX >= 10 || endY >= 10 || newShip.x < 0 || newShip.y < 0) {
+        // First validate the new ship's position
+        if (validateSingleShip(newShip) != null) {
             return false
         }
 
-        // Get cells for new ship
-        val newShipCells = calculateShipCells(newShip)
-
-        // Check overlap with existing ships
-        return existingShips.none { existingShip ->
-            val existingShipCells = calculateShipCells(existingShip)
-            newShipCells.any { it in existingShipCells }
-        }
+        // Then check for overlaps with existing ships
+        return existingShips.none { shipsOverlap(it, newShip) }
     }
 
     fun getShipPlacementPreview(orientation: String, shipType: ShipType, x: Int, y: Int): List<Position> {
