@@ -154,9 +154,9 @@ class BattleshipBoardView @JvmOverloads constructor(
         }
 
         // Draw misses
-        paint.color = Color.WHITE
+        paint.color = Color.rgb(0, 100, 255) // Bright blue color for better visibility
         misses.forEach { position ->
-            // Draw dot for misses
+            // Draw circle for misses
             canvas.drawCircle(
                 offsetX + (position.x + 0.5f) * cellSize,
                 offsetY + (position.y + 0.5f) * cellSize,
