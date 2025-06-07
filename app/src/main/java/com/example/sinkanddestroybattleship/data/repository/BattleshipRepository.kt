@@ -10,6 +10,17 @@ class BattleshipRepository {
     private val api = NetworkModule.battleshipApi
     private val TAG = "BattleshipRepository"
 
+    companion object {
+        // Error messages that can come from server
+        const val ERROR_GAME_EXISTS = "Game already exists"
+        const val ERROR_INVALID_GAME = "Invalid game"
+        const val ERROR_GAME_NOT_FOUND = "Game not found"
+        const val ERROR_NOT_YOUR_TURN = "Not your turn"
+        const val ERROR_INVALID_COORDINATES = "Invalid coordinates"
+        const val ERROR_ID_TOO_SHORT = "ID too short"
+        const val ERROR_INVALID_SHIPS = "Invalid ship placement"
+    }
+
     suspend fun ping(): Result<Boolean> = withContext(Dispatchers.IO) {
         try {
             val response = api.ping()
@@ -30,7 +41,7 @@ class BattleshipRepository {
     suspend fun joinGame(player: String, gameKey: String, ships: List<Ship>): Result<EnemyFireResponse> = 
         withContext(Dispatchers.IO) {
             try {
-                val request = JoinGameRequest(ships, player, gameKey)
+                val request = JoinGameRequest(ships, gameKey, player)
                 Log.d(TAG, "Join game request: $request")
                 val response = api.joinGame(request)
                 Log.d(TAG, "Join game response: ${response.raw()}")
@@ -46,7 +57,12 @@ class BattleshipRepository {
                 } else {
                     val error = parseError(response.errorBody()?.string())
                     Log.e(TAG, "Join game error: $error")
-                    Result.failure(Exception(error))
+                    when {
+                        error.contains("too short") -> Result.failure(Exception(ERROR_ID_TOO_SHORT))
+                        error.contains("already exists") -> Result.failure(Exception(ERROR_GAME_EXISTS))
+                        error.contains("Invalid ship") -> Result.failure(Exception(ERROR_INVALID_SHIPS))
+                        else -> Result.failure(Exception(error))
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Join game exception: ${e.message}")
@@ -57,7 +73,12 @@ class BattleshipRepository {
     suspend fun fire(player: String, gameKey: String, x: Int, y: Int): Result<FireResponse> = 
         withContext(Dispatchers.IO) {
             try {
-                val request = FireRequest(player, gameKey, x, y)
+                // Validate coordinates before sending to server
+                if (x !in 0..9 || y !in 0..9) {
+                    return@withContext Result.failure(Exception(ERROR_INVALID_COORDINATES))
+                }
+
+                val request = FireRequest(x = x, y = y, gamekey = gameKey, player = player)
                 Log.d(TAG, "Fire request: $request")
                 val response = api.fire(request)
                 Log.d(TAG, "Fire response: ${response.raw()}")
@@ -73,7 +94,12 @@ class BattleshipRepository {
                 } else {
                     val error = parseError(response.errorBody()?.string())
                     Log.e(TAG, "Fire error: $error")
-                    Result.failure(Exception(error))
+                    when {
+                        error.contains("not found") -> Result.failure(Exception(ERROR_GAME_NOT_FOUND))
+                        error.contains("not your turn") -> Result.failure(Exception(ERROR_NOT_YOUR_TURN))
+                        error.contains("Invalid coordinates") -> Result.failure(Exception(ERROR_INVALID_COORDINATES))
+                        else -> Result.failure(Exception(error))
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Fire exception: ${e.message}")
@@ -84,7 +110,7 @@ class BattleshipRepository {
     suspend fun enemyFire(player: String, gameKey: String): Result<EnemyFireResponse> = 
         withContext(Dispatchers.IO) {
             try {
-                val request = EnemyFireRequest(player, gameKey)
+                val request = EnemyFireRequest(gamekey = gameKey, player = player)
                 Log.d(TAG, "Enemy fire request: $request")
                 val response = api.enemyFire(request)
                 Log.d(TAG, "Enemy fire response: ${response.raw()}")
@@ -100,7 +126,11 @@ class BattleshipRepository {
                 } else {
                     val error = parseError(response.errorBody()?.string())
                     Log.e(TAG, "Enemy fire error: $error")
-                    Result.failure(Exception(error))
+                    when {
+                        error.contains("not found") -> Result.failure(Exception(ERROR_GAME_NOT_FOUND))
+                        error.contains("Invalid game") -> Result.failure(Exception(ERROR_INVALID_GAME))
+                        else -> Result.failure(Exception(error))
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Enemy fire exception: ${e.message}")

@@ -54,9 +54,7 @@ data class GameCreationResponse(
 data class JoinGameRequest(
     val ships: List<Ship>,
     val gamekey: String,
-    val player: String,
-
-
+    val player: String
 )
 
 data class PlaceShipRequest(
@@ -78,28 +76,26 @@ data class GameResponse(
 )
 
 data class FireRequest(
-    val player: String,
-    val gamekey: String,
     val x: Int,
-    val y: Int
+    val y: Int,
+    val gamekey: String,
+    val player: String
 )
 
 data class FireResponse(
-    val hit: Boolean? = null,
-    val shipsSunk: List<String> = emptyList()
+    val hit: Boolean,
+    val shipsSunk: List<String>
 )
 
 data class EnemyFireRequest(
-    val player: String,
-    val gamekey: String
+    val gamekey: String,
+    val player: String
 )
 
 data class EnemyFireResponse(
     val x: Int? = null,
     val y: Int? = null,
-    val hit: Boolean? = null,
-    val gameover: Boolean? = false,
-    val error: String? = null
+    val gameover: Boolean = false
 )
 
 data class PingResponse(

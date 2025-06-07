@@ -104,7 +104,7 @@ class MainActivity : AppCompatActivity() {
     private fun updateShipPlacementPreview(position: Position) {
         val nextShip = battleshipGame.getNextShipToPlace(ships)
         if (nextShip != null) {
-            val previewShip = Ship(nextShip.name, position.x,currentOrientation, position.y)
+            val previewShip = Ship(currentOrientation, position.x, nextShip.name, position.y)
             val previewCells = battleshipGame.calculateShipCells(previewShip)
             val isValid = battleshipGame.isValidPlacement(previewShip, ships)
             binding.playerBoard.setPreview(previewCells, isValid)
@@ -120,7 +120,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val ship = Ship(currentOrientation, position.x, nextShip.name ,position.y)
+        val ship = Ship(currentOrientation, position.x, nextShip.name, position.y)
         
         if (battleshipGame.isValidPlacement(ship, ships)) {
             ships.add(ship)
@@ -210,24 +210,25 @@ class MainActivity : AppCompatActivity() {
             binding.opponentBoard.setShots(misses, true)
         }
 
+        viewModel.statusText.observe(this) { status ->
+            binding.statusText.text = status
+        }
+
         viewModel.isMyTurn.observe(this) { isMyTurn ->
             binding.opponentBoard.isEnabled = isMyTurn
             if (isMyTurn) {
-                binding.statusText.text = "Your turn! Click on opponent's board to fire."
                 binding.opponentBoard.setOnCellClickListener { position ->
                     lifecycleScope.launch {
                         viewModel.fire(position.x, position.y)
                     }
                 }
             } else {
-                binding.statusText.text = "Opponent's turn - please wait..."
                 binding.opponentBoard.setOnCellClickListener(null)
             }
         }
 
         viewModel.isGameOver.observe(this) { isGameOver ->
             if (isGameOver) {
-                binding.statusText.text = "Game Over!"
                 binding.opponentBoard.setOnCellClickListener(null)
                 binding.opponentBoard.isEnabled = false
             }
@@ -247,11 +248,6 @@ class MainActivity : AppCompatActivity() {
                 binding.playerIdInput.isEnabled = false
                 binding.startGameButton.visibility = View.GONE
                 isPlacingShips = false
-                binding.statusText.text = if (viewModel.isMyTurn.value == true) {
-                    "Game started - Your turn!"
-                } else {
-                    "Game started - Waiting for opponent..."
-                }
             }
         }
     }

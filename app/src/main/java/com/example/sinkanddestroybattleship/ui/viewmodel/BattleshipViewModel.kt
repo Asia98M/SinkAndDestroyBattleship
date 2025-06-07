@@ -1,6 +1,7 @@
 package com.example.sinkanddestroybattleship.ui.viewmodel
 
 import android.annotation.SuppressLint
+import android.util.Log
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
 import androidx.lifecycle.ViewModel
@@ -47,6 +48,9 @@ class BattleshipViewModel : ViewModel() {
     private var retryCount = 0
     private val maxRetries = 3
 
+    private val _statusText = MutableLiveData<String>()
+    val statusText: LiveData<String> = _statusText
+
     init {
         _playerHits.value = emptyList()
         _playerMisses.value = emptyList()
@@ -81,26 +85,60 @@ class BattleshipViewModel : ViewModel() {
         retryCount = 0
 
         viewModelScope.launch {
-            repository.joinGame(player, gameKey, ships).fold(
-                onSuccess = { response ->
-                    if (response.error != null) {
-                        _error.value = response.error
-                        currentPlayer = null
-                        currentGameKey = null
-                    } else {
-                        _gameJoined.value = true
-                        _isMyTurn.value = response.x == null && response.y == null
-                        handleEnemyFireResponse(response)
-                        startListeningForEnemyFire()
+            try {
+                _statusText.value = "Joining game..."
+                val request = JoinGameRequest(ships, gameKey, player)
+                Log.d(TAG, "Attempting to join game with request: $request")
+                
+                repository.joinGame(player, gameKey, ships).fold(
+                    onSuccess = { response ->
+                        handleJoinSuccess(response)
+                    },
+                    onFailure = { exception ->
+                        handleJoinError(exception.message ?: "Unknown error occurred")
                     }
-                },
-                onFailure = { exception ->
-                    _error.value = exception.message
-                    currentPlayer = null
-                    currentGameKey = null
-                }
-            )
+                )
+            } catch (e: Exception) {
+                handleJoinError(e.message ?: "Unknown error occurred")
+            }
         }
+    }
+
+    private fun handleJoinError(error: String) {
+        Log.e(TAG, "Join game error: $error")
+        _error.value = when (error) {
+            BattleshipRepository.ERROR_ID_TOO_SHORT -> "Player ID and Game Key must be at least 3 characters"
+            BattleshipRepository.ERROR_GAME_EXISTS -> "Game already exists with this key. Try a different key."
+            BattleshipRepository.ERROR_INVALID_SHIPS -> "Invalid ship placement. Please check ship positions."
+            else -> "Failed to join game: $error"
+        }
+        currentPlayer = null
+        currentGameKey = null
+        _statusText.value = "Failed to join game. Please try again."
+    }
+
+    private fun handleJoinSuccess(response: EnemyFireResponse) {
+        Log.d(TAG, "Join game success: $response")
+        _gameJoined.value = true
+        
+        if (response.gameover) {
+            _statusText.value = "Game ended unexpectedly"
+            _isGameOver.value = true
+            return
+        }
+
+        // If x and y are null, we're the first player (it's our turn)
+        // If x and y are set, we're the second player (opponent's turn)
+        val isFirstPlayer = response.x == null && response.y == null
+        _isMyTurn.value = isFirstPlayer
+        
+        if (isFirstPlayer) {
+            _statusText.value = "Waiting for opponent to join..."
+        } else {
+            handleEnemyFireResponse(response)
+        }
+
+        startListeningForEnemyFire()
     }
 
     fun fire(x: Int, y: Int) {
@@ -108,13 +146,6 @@ class BattleshipViewModel : ViewModel() {
         val gameKey = currentGameKey
         if (player == null || gameKey == null) {
             _error.value = "Game not initialized"
-            return
-        }
-
-        // Validate move coordinates
-        val moveError = BattleshipGame().validateMove(x, y)
-        if (moveError != null) {
-            _error.value = moveError
             return
         }
 
@@ -132,33 +163,53 @@ class BattleshipViewModel : ViewModel() {
             return
         }
 
+        // Validate coordinates are within grid
+        if (x !in 0..9 || y !in 0..9) {
+            _error.value = "Coordinates must be between 0 and 9"
+            return
+        }
+
         viewModelScope.launch {
             repository.fire(player, gameKey, x, y).fold(
                 onSuccess = { response ->
                     val position = Position(x, y)
-                    response.hit?.let { isHit ->
-                        if (isHit) {
-                            val currentHits = _playerHits.value.orEmpty().toMutableList()
-                            currentHits.add(position)
-                            _playerHits.value = currentHits
-                            _error.value = if (response.shipsSunk.isNotEmpty()) {
-                                "Hit and sunk ${response.shipsSunk.joinToString()}!"
-                            } else {
-                                "Hit!"
-                            }
+                    if (response.hit) {
+                        val currentHits = _playerHits.value.orEmpty().toMutableList()
+                        currentHits.add(position)
+                        _playerHits.value = currentHits
+                        _error.value = if (response.shipsSunk.isNotEmpty()) {
+                            "Hit and sunk ${response.shipsSunk.joinToString()}!"
                         } else {
-                            val currentMisses = _playerMisses.value.orEmpty().toMutableList()
-                            currentMisses.add(position)
-                            _playerMisses.value = currentMisses
-                            _error.value = "Miss!"
+                            "Hit!"
                         }
-                        _isMyTurn.value = false
-                    } ?: run {
-                        _error.value = "Invalid response from server"
+                    } else {
+                        val currentMisses = _playerMisses.value.orEmpty().toMutableList()
+                        currentMisses.add(position)
+                        _playerMisses.value = currentMisses
+                        _error.value = "Miss!"
                     }
+                    _isMyTurn.value = false
+                    _statusText.value = "Waiting for opponent's move..."
                 },
                 onFailure = { exception ->
-                    _error.value = exception.message
+                    when (exception.message) {
+                        BattleshipRepository.ERROR_NOT_YOUR_TURN -> {
+                            _error.value = "Not your turn"
+                            _statusText.value = "Wait for your turn"
+                        }
+                        BattleshipRepository.ERROR_INVALID_COORDINATES -> {
+                            _error.value = "Invalid coordinates"
+                        }
+                        BattleshipRepository.ERROR_GAME_NOT_FOUND -> {
+                            _error.value = "Game session has expired"
+                            _isGameOver.value = true
+                            _statusText.value = "Game ended - session expired"
+                        }
+                        else -> {
+                            _error.value = exception.message
+                            _statusText.value = "Error occurred during your move"
+                        }
+                    }
                 }
             )
         }
@@ -174,39 +225,51 @@ class BattleshipViewModel : ViewModel() {
                 return@launch
             }
 
-            repository.enemyFire(player, gameKey).fold(
-                onSuccess = { response ->
-                    if (response.error != null) {
-                        handleServerError(response.error)
-                    } else {
+            _isGameOver.value = false // Initialize to false
+            while (_isGameOver.value == false) { // Safe null check
+                repository.enemyFire(player, gameKey).fold(
+                    onSuccess = { response ->
                         retryCount = 0
                         handleEnemyFireResponse(response)
-                        if (!(response.gameover ?: false)) {
+                        if (!response.gameover) {
                             delay(1000) // Add a small delay before next poll
-                            startListeningForEnemyFire()
+                        }
+                    },
+                    onFailure = { exception ->
+                        when (exception.message) {
+                            BattleshipRepository.ERROR_GAME_NOT_FOUND,
+                            BattleshipRepository.ERROR_INVALID_GAME -> {
+                                _error.value = "Game session has ended"
+                                _isGameOver.value = true
+                                _statusText.value = "Game ended - session expired"
+                            }
+                            else -> handleNetworkError(exception)
                         }
                     }
-                },
-                onFailure = { exception ->
-                    handleNetworkError(exception)
-                }
-            )
+                )
+            }
         }
     }
 
     private fun handleServerError(error: String) {
-        if (error.contains("Game not found") || error.contains("Invalid game")) {
-            _error.value = "Game session ended: $error"
-            _isGameOver.value = true
-        } else if (retryCount < maxRetries) {
-            retryCount++
-            viewModelScope.launch {
-                delay(2000L * retryCount) // Exponential backoff
-                startListeningForEnemyFire()
+        when {
+            error.contains("Game not found") || error.contains("Invalid game") -> {
+                _error.value = "Game session ended: $error"
+                _isGameOver.value = true
+                _statusText.value = "Game ended - session expired or invalid"
             }
-        } else {
-            _error.value = "Server error after $maxRetries retries: $error"
-            _isGameOver.value = true
+            retryCount < maxRetries -> {
+                retryCount++
+                viewModelScope.launch {
+                    delay(2000L * retryCount) // Exponential backoff
+                    startListeningForEnemyFire()
+                }
+            }
+            else -> {
+                _error.value = "Server error after $maxRetries retries: $error"
+                _isGameOver.value = true
+                _statusText.value = "Game ended due to server error"
+            }
         }
     }
 
@@ -227,8 +290,8 @@ class BattleshipViewModel : ViewModel() {
     }
 
     private fun handleEnemyFireResponse(response: EnemyFireResponse) {
-        _isGameOver.value = response.gameover ?: false
-        if (!(response.gameover ?: false)) {
+        _isGameOver.value = response.gameover
+        if (!response.gameover) {
             // Check if we have actual coordinates (a shot was made)
             if (response.x != null && response.y != null) {
                 val currentShots = _enemyShots.value.orEmpty().toMutableList()
@@ -236,32 +299,40 @@ class BattleshipViewModel : ViewModel() {
                 currentShots.add(position)
                 _enemyShots.value = currentShots
                 
-                // Update the status text based on hit or miss
-                response.hit?.let { isHit ->
-                    _error.value = if (isHit) "Enemy hit your ship!" else "Enemy missed!"
-                } ?: run {
-                    _error.value = "Enemy fired at (${response.x}, ${response.y})"
-                }
+                // Check if the shot hit one of our ships
+                val hitShip = _playerShips.value?.any { ship ->
+                    val shipCells = BattleshipGame().calculateShipCells(ship)
+                    shipCells.any { it.x == response.x && it.y == response.y }
+                } ?: false
+
+                _error.value = if (hitShip) "Enemy hit your ship!" else "Enemy missed!"
                 _isMyTurn.value = true
+                _statusText.value = "Your turn! Make your move."
             } else {
-                // No shot coordinates could mean:
-                // 1. We're the first player to join (our turn)
-                // 2. We're the second player and need to wait
-                // 3. We're waiting for opponent's move
+                // No shot coordinates means we're waiting for opponent
                 if (_gameJoined.value == true) {
-                    _error.value = if (_isMyTurn.value == true) {
-                        "Your turn! Make your move."
+                    if (_isMyTurn.value == true) {
+                        _statusText.value = "Your turn! Make your move."
                     } else {
-                        "Waiting for opponent's move..."
+                        _statusText.value = "Waiting for opponent's move..."
                     }
+                } else {
+                    _statusText.value = "Waiting for opponent to join..."
                 }
             }
+        } else {
+            _statusText.value = "Game Over!"
+            _isGameOver.value = true
         }
     }
 
     override fun onCleared() {
         super.onCleared()
         enemyFireJob?.cancel()
+    }
+
+    companion object {
+        private const val TAG = "BattleshipViewModel"
     }
 }
 
