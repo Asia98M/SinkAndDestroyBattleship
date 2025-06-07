@@ -45,6 +45,9 @@ class BattleshipViewModel : ViewModel() {
     private val _gameJoined = MutableLiveData<Boolean>()
     val gameJoined: LiveData<Boolean> = _gameJoined
 
+    private val _sunkShips = MutableLiveData<List<String>>()
+    val sunkShips: LiveData<List<String>> = _sunkShips
+
     private var currentPlayer: String? = null
     private var currentGameKey: String? = null
     private var enemyFireJob: Job? = null
@@ -59,6 +62,7 @@ class BattleshipViewModel : ViewModel() {
     init {
         _playerHits.value = emptyList()
         _playerMisses.value = emptyList()
+        _sunkShips.value = emptyList()
     }
 
     suspend fun ping(): Result<Boolean> {
@@ -125,6 +129,7 @@ class BattleshipViewModel : ViewModel() {
     private fun handleJoinSuccess(response: EnemyFireResponse) {
         Log.d(TAG, "Join game success: $response")
         _gameJoined.value = true
+        _sunkShips.value = emptyList()
         
         if (response.gameover) {
             _statusText.value = "Game ended unexpectedly"
@@ -156,15 +161,25 @@ class BattleshipViewModel : ViewModel() {
             _enemyShots.value = currentShots
             
             // Check if the shot hit one of our ships
-            val hitShip = _playerShips.value?.any { ship ->
+            val hitShip = _playerShips.value?.find { ship ->
                 val shipCells = BattleshipGame().calculateShipCells(ship)
                 shipCells.any { it.x == response.x && it.y == response.y }
-            } ?: false
+            }
 
-            _statusText.value = if (hitShip) {
-                "Enemy hit your ship at (${response.x}, ${response.y})! Your turn."
+            if (hitShip != null) {
+                // Check if the ship is sunk
+                val shipCells = BattleshipGame().calculateShipCells(hitShip)
+                val allCellsHit = shipCells.all { cell ->
+                    currentShots.any { shot -> shot.x == cell.x && shot.y == cell.y }
+                }
+
+                _statusText.value = if (allCellsHit) {
+                    "Enemy sunk your ${hitShip.ship}! Your turn."
+                } else {
+                    "Enemy hit your ${hitShip.ship} at (${response.x}, ${response.y})! Your turn."
+                }
             } else {
-                "Enemy missed at (${response.x}, ${response.y})! Your turn."
+                _statusText.value = "Enemy missed at (${response.x}, ${response.y})! Your turn."
             }
             _isMyTurn.value = true
         }
@@ -274,10 +289,26 @@ class BattleshipViewModel : ViewModel() {
                                 val currentHits = _playerHits.value.orEmpty().toMutableList()
                                 currentHits.add(position)
                                 _playerHits.value = currentHits
-                                _statusText.value = if (response.shipsSunk.isNotEmpty()) {
-                                    "Hit and sunk ${response.shipsSunk.joinToString()}! Waiting for opponent..."
+
+                                if (response.shipsSunk.isNotEmpty()) {
+                                    // Update sunk ships list
+                                    val currentSunkShips = _sunkShips.value.orEmpty().toMutableList()
+                                    currentSunkShips.addAll(response.shipsSunk)
+                                    _sunkShips.value = currentSunkShips
+
+                                    // Check if all ships are sunk
+                                    if (currentSunkShips.size == BattleshipGame.SHIP_TYPES.size) {
+                                        _isGameOver.value = true
+                                        _statusText.value = "Congratulations! You've won the game by sinking all enemy ships!"
+                                    } else {
+                                        _statusText.value = buildString {
+                                            append("Hit and sunk ${response.shipsSunk.joinToString()}!")
+                                            append(" Ships remaining: ${BattleshipGame.SHIP_TYPES.size - currentSunkShips.size}")
+                                            append(" Waiting for opponent...")
+                                        }
+                                    }
                                 } else {
-                                    "Hit! Waiting for opponent..."
+                                    _statusText.value = "Hit! Waiting for opponent..."
                                 }
                             } else {
                                 val currentMisses = _playerMisses.value.orEmpty().toMutableList()
